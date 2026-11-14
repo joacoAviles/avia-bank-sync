@@ -15,8 +15,12 @@ PLATFORM="${PLATFORM:-linux/amd64}"   # Synology x86_64. Para ARM: PLATFORM=linu
 docker build --platform "$PLATFORM" -f "$SRC/sync-server.Dockerfile" -t "$ACTUAL_IMG" "$SRC"
 
 # 2) Runner: @actual-app/api compilado desde la MISMA fuente parcheada.
-docker build --platform "$PLATFORM" -f "$ROOT/docker/runner.Dockerfile" \
-  --build-context actual="$SRC" -t "$RUNNER_IMG" "$ROOT/runner"
+#    (contexto preparado a mano: no depende de `--build-context`, que el Docker del Synology no trae)
+CTX="$ROOT/build/runner-ctx"
+rm -rf "$CTX"; mkdir -p "$CTX/actual" "$CTX/runner"
+tar -C "$SRC" --exclude=.git --exclude=node_modules -cf - . | tar -C "$CTX/actual" -xf -
+cp "$ROOT/runner/package.json" "$ROOT/runner/index.mjs" "$CTX/runner/"
+docker build --platform "$PLATFORM" -f "$ROOT/docker/runner.Dockerfile" -t "$RUNNER_IMG" "$CTX"
 
 if [ "${1:-}" = "--push" ]; then
   docker push "$ACTUAL_IMG"

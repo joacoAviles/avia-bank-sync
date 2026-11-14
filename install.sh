@@ -25,9 +25,8 @@ BACKUP_DIR="${BACKUP_DIR:-$HOME/backups-avia}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 AVIA_DIR="$HERE/avia-bank-sync"
 INTEG_DIR="$HERE/actual-avia-integration"
-STAMP="$(date +%Y%m%d-%H%M%S)"
+STAMP="${AVIA_STAMP:-$(date +%Y%m%d-%H%M%S)}"; export AVIA_STAMP="$STAMP"
 LOG="$HERE/instalacion-avia-$STAMP.log"
-exec > >(tee -a "$LOG") 2>&1
 
 say()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m  ✔ %s\033[0m\n' "$*"; }
@@ -37,6 +36,29 @@ ask()  { local v; read -r -p "  $1 " v </dev/tty; printf '%s' "$v"; }
 asks() { local v; read -r -s -p "  $1 " v </dev/tty; echo >/dev/tty; printf '%s' "$v"; }
 
 [ "$(id -u)" = 0 ] || die "Ejecuta con sudo:  sudo bash $0"
+
+# Pregunta lo necesario AL INICIO y sigue en segundo plano: si se cae el SSH, la instalación continúa.
+if [ -z "${AVIA_BG:-}" ]; then
+  if [ ! -s "$AVIA_DIR/secrets/actual_password" ]; then
+    ACTUAL_PW_IN="$(asks 'Contraseña de tu servidor Actual (la que usas para entrar):')"
+    [ -n "$ACTUAL_PW_IN" ] || die "Contraseña vacía"
+  fi
+  if [ ! -f "$AVIA_DIR/.env" ]; then
+    SYNC_IN="$(ask 'Sync ID del presupuesto (Actual > Configuración > Mostrar avanzado > Sync ID):')"
+    [ -n "$SYNC_IN" ] || die "Sync ID vacío"
+  fi
+  export ACTUAL_PW_IN SYNC_IN
+  : > "$LOG"
+  AVIA_BG=1 nohup bash "$0" >/dev/null 2>&1 </dev/null &
+  CHILD=$!
+  echo "  Instalando en segundo plano (pid $CHILD). Si se corta el SSH, sigue solo."
+  echo "  Para volver a ver el avance:  tail -f $LOG"
+  tail -f "$LOG" & TP=$!
+  wait "$CHILD" || true
+  sleep 1; kill "$TP" 2>/dev/null || true
+  exit 0
+fi
+exec > >(tee -a "$LOG") 2>&1
 
 # ---------- 0. Preflight ----------
 say "0/8 Revisando el NAS"
@@ -154,16 +176,16 @@ gen api_token "$(rnd 64)"
 gen encryption_keys "$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '\n')"
 gen backup_key "$(rnd 64)"
 if [ ! -s secrets/actual_password ]; then
-  P="$(asks 'Contraseña de tu servidor Actual (la que usas para entrar):')"
-  [ -n "$P" ] || die "Contraseña vacía"
+  P="${ACTUAL_PW_IN:-}"
+  [ -n "$P" ] || die "Falta la contraseña de Actual"
   printf '%s' "$P" > secrets/actual_password; ok "creado secrets/actual_password"
 fi
 [ -e secrets/actual_e2e_password ] || { : > secrets/actual_e2e_password; }
 chmod 700 secrets; chmod 644 secrets/*   # los contenedores (uid 1001/postgres) deben poder leerlos; la carpeta es solo root
 
 if [ ! -f .env ]; then
-  SYNC="$(ask 'Sync ID del presupuesto (Actual > Configuración > Mostrar avanzado > Sync ID):')"
-  [ -n "$SYNC" ] || die "Sync ID vacío"
+  SYNC="${SYNC_IN:-}"
+  [ -n "$SYNC" ] || die "Falta el Sync ID"
   cp .env.example .env
   sed -i "s|^ACTUAL_BUDGET_SYNC_ID=.*|ACTUAL_BUDGET_SYNC_ID=$SYNC|" .env
   sed -i "s|^ACTUAL_NETWORK=.*|ACTUAL_NETWORK=$ACTUAL_NET|" .env
