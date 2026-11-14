@@ -108,7 +108,9 @@ if ! command -v git >/dev/null; then
   say "   git no instalado: uso contenedor node (el mismo que compila Actual)"
   cat > "$TOOLS/bin/git" <<EOF2
 #!/bin/sh
-exec docker run --rm -v "\$PWD":"\$PWD" -v "$INTEG_DIR":"$INTEG_DIR":ro -w "\$PWD" -e HOME=/tmp \
+EXTRA="-v $INTEG_DIR:$INTEG_DIR:ro"
+[ "\$PWD" = "$INTEG_DIR" ] && EXTRA=""
+exec docker run --rm -v "\$PWD":"\$PWD" \$EXTRA -w "\$PWD" -e HOME=/tmp \
   -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
   node:24.22.1-bookworm git "\$@"
 EOF2
