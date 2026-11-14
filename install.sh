@@ -98,7 +98,7 @@ ok "Carpetas listas en $HERE"
 
 # ---------- 3. Imágenes ----------
 say "3/8 Construyendo imágenes (Actual+AVIA, runner, AVIA) — tarda 10-30 min"
-TOOLS="$(mktemp -d)"; mkdir -p "$TOOLS/bin"; export PATH="$TOOLS/bin:$PATH"
+TOOLS="$HERE/.tools"; mkdir -p "$TOOLS/bin"; export PATH="$TOOLS/bin:$PATH"
 if ! command -v jq >/dev/null; then
   say "   instalando jq temporal"
   curl -fsSL -o "$TOOLS/bin/jq" "https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-$JQARCH" || die "No pude bajar jq"
