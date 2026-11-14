@@ -7,8 +7,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 TZ=America/S
 
 # Chromium real + pantalla virtual para el login asistido de portales bancarios.
 # Navegador estándar: sin plugins "stealth" ni identidad falseada.
-RUN apt-get update && apt-get install -y --no-install-recommends tzdata tini \
-        chromium xvfb xauth fonts-liberation fonts-noto-color-emoji \
+# dbus-x11 primero: evita que apt arrastre "systemd" (su postinst falla en el Docker/kernel antiguo del Synology).
+# Si aun así algún paquete queda sin configurar, se verifica que chromium y Xvfb existan.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends dbus-x11 \
+    && ( apt-get install -y --no-install-recommends tzdata tini \
+            chromium xvfb xauth fonts-liberation fonts-noto-color-emoji \
+         || dpkg --configure -a --force-depends || true ) \
+    && test -x /usr/bin/chromium && test -x /usr/bin/Xvfb && test -x /usr/bin/tini \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1001 avia && useradd --uid 1001 --gid avia --no-create-home avia
 
