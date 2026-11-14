@@ -155,7 +155,7 @@ fi
 [ -d "$INTEG_DIR/build/actual/packages" ] || rm -rf "$INTEG_DIR/build"   # clon a medias de un intento anterior
 export PLATFORM
 ( cd "$INTEG_DIR" && ./scripts/build-images.sh )
-( cd "$AVIA_DIR" && AVIA_VERSION=1.0.0 $DC build avia-api )
+docker build --platform "$PLATFORM" -t "aviarockets/avia-bank-sync:1.0.0" "$AVIA_DIR"
 
 if [ -n "$SWAPF" ]; then swapoff "$SWAPF" 2>/dev/null || true; rm -f "$SWAPF"; fi
 
