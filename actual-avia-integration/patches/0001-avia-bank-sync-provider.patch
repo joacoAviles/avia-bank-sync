@@ -1,0 +1,2452 @@
+diff --git a/packages/desktop-client/src/accounts/mutations.ts b/packages/desktop-client/src/accounts/mutations.ts
+index ce4535633..ad7828de5 100644
+--- a/packages/desktop-client/src/accounts/mutations.ts
++++ b/packages/desktop-client/src/accounts/mutations.ts
+@@ -7,6 +7,7 @@ import type {
+   AccountGroupEntity,
+   CategoryEntity,
+   SyncServerAkahuAccount,
++  SyncServerAviaAccount,
+   SyncServerEnableBankingAccount,
+   SyncServerGoCardlessAccount,
+   SyncServerPluggyAiAccount,
+@@ -547,6 +548,48 @@ export function useLinkAccountAkahuMutation() {
+   });
+ }
+ 
++type LinkAccountAviaPayload = LinkAccountBasePayload & {
++  externalAccount: SyncServerAviaAccount;
++};
++
++export function useLinkAccountAviaMutation() {
++  const queryClient = useQueryClient();
++  const dispatch = useDispatch();
++  const { t } = useTranslation();
++
++  return useMutation({
++    mutationFn: async ({
++      externalAccount,
++      upgradingId,
++      offBudget,
++      startingDate,
++      startingBalance,
++    }: LinkAccountAviaPayload) => {
++      await send('avia-accounts-link', {
++        externalAccount,
++        upgradingId,
++        offBudget,
++        startingDate,
++        startingBalance,
++      });
++    },
++    onSuccess: () => {
++      invalidateQueries(queryClient);
++      invalidateQueries(queryClient, payeeQueries.lists());
++    },
++    onError: error => {
++      console.error('Error linking account to AVIA Bank Sync:', error);
++      dispatchErrorNotification(
++        dispatch,
++        t(
++          'There was an error linking the account to AVIA Bank Sync. Please try again.',
++        ),
++        error,
++      );
++    },
++  });
++}
++
+ type LinkAccountEnableBankingPayload = LinkAccountBasePayload & {
+   externalAccount: SyncServerEnableBankingAccount;
+ };
+diff --git a/packages/desktop-client/src/components/Modals.tsx b/packages/desktop-client/src/components/Modals.tsx
+index f7e846d5c..5f67c1d59 100644
+--- a/packages/desktop-client/src/components/Modals.tsx
++++ b/packages/desktop-client/src/components/Modals.tsx
+@@ -18,6 +18,7 @@ import { AccountMenuModal } from './modals/AccountMenuModal';
+ import { AccountReconcileModal } from './modals/AccountReconcileModal';
+ import { AkahuInitialiseModal } from './modals/AkahuInitialiseModal';
+ import { AllAccountsMenuModal } from './modals/AllAccountsMenuModal';
++import { AviaInitialiseModal } from './modals/AviaInitialiseModal';
+ import { BudgetAutomationsModal } from './modals/BudgetAutomationsModal';
+ import { BudgetPageMenuModal } from './modals/BudgetPageMenuModal';
+ import { CategoryAutocompleteModal } from './modals/CategoryAutocompleteModal';
+@@ -201,6 +202,8 @@ export function Modals() {
+ 
+         case 'akahu-init':
+           return <AkahuInitialiseModal key={key} {...modal.options} />;
++        case 'avia-init':
++          return <AviaInitialiseModal key={key} {...modal.options} />;
+ 
+         case 'enablebanking-init':
+           return <EnableBankingInitialiseModal key={key} {...modal.options} />;
+diff --git a/packages/desktop-client/src/components/banksync/bankSyncUtils.ts b/packages/desktop-client/src/components/banksync/bankSyncUtils.ts
+index 6d8b2f99f..ae8b27ef0 100644
+--- a/packages/desktop-client/src/components/banksync/bankSyncUtils.ts
++++ b/packages/desktop-client/src/components/banksync/bankSyncUtils.ts
+@@ -18,6 +18,7 @@ const SYNC_PROVIDER_KEYS = [
+   ...BUILT_IN_BANK_SYNC_PROVIDERS,
+   'enableBanking',
+   'akahu',
++  'avia',
+   'unlinked',
+ ] as const satisfies readonly SyncProviders[];
+ 
+@@ -36,6 +37,7 @@ export function getSyncSourceReadable(
+     pluggyai: 'Pluggy.ai',
+     enableBanking: 'Enable Banking',
+     akahu: 'Akahu',
++    avia: 'Bancos chilenos',
+     unlinked: translate('Unlinked'),
+   };
+ }
+diff --git a/packages/desktop-client/src/components/banksync/useBuiltInBankSyncProviders.ts b/packages/desktop-client/src/components/banksync/useBuiltInBankSyncProviders.ts
+index 80da4f7a4..36d22a142 100644
+--- a/packages/desktop-client/src/components/banksync/useBuiltInBankSyncProviders.ts
++++ b/packages/desktop-client/src/components/banksync/useBuiltInBankSyncProviders.ts
+@@ -12,6 +12,7 @@ import type { SyncServerSimpleFinAccount } from '@actual-app/core/types/models/s
+ import { authorizeBank as authorizeEnableBanking } from '#enablebanking';
+ import { authorizeBank } from '#gocardless';
+ import { useAkahuStatus } from '#hooks/useAkahuStatus';
++import { useAviaStatus } from '#hooks/useAviaStatus';
+ import { useCurrentAccess } from '#hooks/useCurrentAccess';
+ import { useEnableBankingStatus } from '#hooks/useEnableBankingStatus';
+ import { useFeatureFlag } from '#hooks/useFeatureFlag';
+@@ -116,6 +117,7 @@ export function useBuiltInBankSyncProviders({
+   const [loadingSimpleFinAccounts, setLoadingSimpleFinAccounts] =
+     useState(false);
+   const [loadingAkahuAccounts, setLoadingAkahuAccounts] = useState(false);
++  const [loadingAviaAccounts, setLoadingAviaAccounts] = useState(false);
+ 
+   const enableBankingEnabled = useFeatureFlag('enableBanking');
+   const akahuEnabled = useFeatureFlag('akahuBankSync');
+@@ -123,6 +125,7 @@ export function useBuiltInBankSyncProviders({
+   const { simpleFinStatus, setSimpleFinStatus } = useSimpleFinStatus();
+   const { pluggyAiStatus, setPluggyAiStatus } = usePluggyAiStatus();
+   const { configuredAkahu } = useAkahuStatus(akahuEnabled);
++  const { aviaStatus, refresh: refreshAviaStatus } = useAviaStatus();
+   const { configuredEnableBanking, isLoading: isEnableBankingLoading } =
+     useEnableBankingStatus(enableBankingEnabled);
+ 
+@@ -232,6 +235,88 @@ export function useBuiltInBankSyncProviders({
+     );
+   }, [dispatch]);
+ 
++  const onAviaInit = useCallback(() => {
++    dispatch(
++      pushModal({
++        modal: {
++          name: 'avia-init',
++          options: {
++            onSuccess: () => void refreshAviaStatus(),
++          },
++        },
++      }),
++    );
++  }, [dispatch, refreshAviaStatus]);
++
++  const onConnectAvia = useCallback(async () => {
++    if (!aviaStatus.configured) {
++      onAviaInit();
++      return;
++    }
++    if (loadingAviaAccounts) {
++      return;
++    }
++    setLoadingAviaAccounts(true);
++    try {
++      const results = await send('avia-accounts');
++      if (results?.error_code) {
++        throw new Error(results.reason || results.error_code);
++      }
++      if (results && 'error' in results && results.error) {
++        throw new Error(results.reason || results.error);
++      }
++      type AviaAccount = {
++        account_id: string;
++        name: string;
++        institution: string;
++        institutionId: string;
++        balance: number;
++      };
++      const externalAccounts = ((results?.accounts ?? []) as AviaAccount[]).map(
++        a => ({
++          account_id: a.account_id,
++          name: a.name,
++          institution: a.institution,
++          orgDomain: null,
++          orgId: a.institutionId,
++          balance: a.balance,
++        }),
++      );
++      dispatch(
++        pushModal({
++          modal: {
++            name: 'select-linked-accounts',
++            options: {
++              externalAccounts,
++              syncSource: 'avia',
++              upgradingAccountId,
++            },
++          },
++        }),
++      );
++    } catch (error) {
++      dispatch(
++        addNotification({
++          notification: {
++            type: 'error',
++            title: t('Error when trying to contact AVIA Bank Sync'),
++            message: error instanceof Error ? error.message : String(error),
++            timeout: 5000,
++          },
++        }),
++      );
++    } finally {
++      setLoadingAviaAccounts(false);
++    }
++  }, [
++    aviaStatus.configured,
++    dispatch,
++    loadingAviaAccounts,
++    onAviaInit,
++    t,
++    upgradingAccountId,
++  ]);
++
+   const notifyResetFailure = useCallback(
+     (providerName: string, error: unknown) => {
+       dispatch(
+@@ -662,6 +747,7 @@ export function useBuiltInBankSyncProviders({
+     pluggyai: Boolean(pluggyAiStatus.configured),
+     enableBanking: Boolean(isEnableBankingSetupComplete),
+     akahu: Boolean(isAkahuSetupComplete),
++    avia: Boolean(aviaStatus.configured),
+   } satisfies Record<BankSyncProviders, boolean>;
+ 
+   const providers = useMemo<BuiltInBankSyncProviderState[]>(() => {
+@@ -722,6 +808,48 @@ export function useBuiltInBankSyncProviders({
+         };
+       });
+ 
++    // AVIA Bank Sync: proveedor propio, siempre visible (sin feature flag).
++    const aviaDescription = (() => {
++      if (!aviaStatus.reachable) {
++        return t(
++          'Bank sync provider by Avia Rockets. The AVIA service is not reachable from this server.',
++        );
++      }
++      switch (aviaStatus.state) {
++        case 'authorization_required':
++          return t('A bank connection needs you to sign in again.');
++        case 'error':
++          return t('Last sync finished with errors. Open Set up for details.');
++        case 'syncing':
++          return t('Syncing…');
++        case 'not_configured':
++          return t(
++            'Banco de Chile, Itaú and Ripley: sign in with your RUT and password (AVIA).',
++          );
++        default:
++          return aviaStatus.lastSuccessfulSync
++            ? t('Last sync: {{date}} · {{count}} linked accounts', {
++                date: new Date(aviaStatus.lastSuccessfulSync).toLocaleString(),
++                count: aviaStatus.linkedAccounts ?? 0,
++              })
++            : t('Connected. Waiting for the first sync.');
++      }
++    })();
++    baseProviders.push({
++      id: 'avia',
++      displayName: 'Bancos chilenos',
++      description: aviaDescription,
++      isConfigured: configuredProviders.avia,
++      credentialSource: 'global',
++      supportsPerBudgetFile: false,
++      canConfigure: canConfigureProviders,
++      isLoading: loadingAviaAccounts,
++      onConfigure: onAviaInit,
++      onLink: onConnectAvia,
++      // En AVIA las credenciales viven en el servicio; «reset» abre la gestión de conexiones.
++      onReset: onAviaInit,
++    });
++
+     if (akahuEnabled) {
+       baseProviders.push({
+         id: 'akahu',
+@@ -768,6 +896,11 @@ export function useBuiltInBankSyncProviders({
+     configuredProviders.pluggyai,
+     configuredProviders.simpleFin,
+     configuredProviders.akahu,
++    configuredProviders.avia,
++    aviaStatus,
++    loadingAviaAccounts,
++    onAviaInit,
++    onConnectAvia,
+     pluggyAiStatus,
+     simpleFinStatus,
+     syncServerStatus,
+diff --git a/packages/desktop-client/src/components/modals/AviaInitialiseModal.tsx b/packages/desktop-client/src/components/modals/AviaInitialiseModal.tsx
+new file mode 100644
+index 000000000..88f34de37
+--- /dev/null
++++ b/packages/desktop-client/src/components/modals/AviaInitialiseModal.tsx
+@@ -0,0 +1,607 @@
++// «Bancos chilenos» (AVIA Bank Sync): Set up.
++// - Conexiones existentes: estado, volver a iniciar sesión, eliminar.
++// - Nueva conexión: banco + RUT + clave -> login asistido en el portal del banco.
++//   Si el banco pide un paso humano (Mi Pass, código, CAPTCHA), se muestra la
++//   pantalla del navegador de AVIA en vivo y el usuario lo resuelve aquí.
++import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
++import type { MouseEvent as ReactMouseEvent } from 'react';
++import { Trans, useTranslation } from 'react-i18next';
++
++import { Button, ButtonWithLoading } from '@actual-app/components/button';
++import { Input } from '@actual-app/components/input';
++import { Select } from '@actual-app/components/select';
++import { Text } from '@actual-app/components/text';
++import { theme } from '@actual-app/components/theme';
++import { View } from '@actual-app/components/view';
++import { send } from '@actual-app/core/platform/client/connection';
++import type {
++  AviaConnection,
++  AviaInstitution,
++  AviaLogin,
++} from '@actual-app/core/types/models';
++
++import { Error as ErrorAlert, Information, Warning } from '#components/alerts';
++import {
++  Modal,
++  ModalButtons,
++  ModalCloseButton,
++  ModalHeader,
++} from '#components/common/Modal';
++import { FormField, FormLabel } from '#components/forms';
++import { useAviaStatus } from '#hooks/useAviaStatus';
++import type { Modal as ModalType } from '#modals/modalsSlice';
++
++type AviaInitialiseModalProps = Extract<
++  ModalType,
++  { name: 'avia-init' }
++>['options'];
++
++type LoginInput =
++  | { type: 'click'; x: number; y: number }
++  | { type: 'type'; text: string }
++  | { type: 'key'; key: string }
++  | { type: 'scroll'; dy: number }
++  | { type: 'cancel' };
++
++type AviaResponse = {
++  error?: string;
++  error_code?: string;
++  reason?: string;
++};
++
++const FINAL_STATES = new Set(['succeeded', 'failed', 'cancelled', 'expired']);
++
++function errorOf(res: AviaResponse | undefined): string | null {
++  if (!res) return 'Sin respuesta de AVIA';
++  if (res.error_code) return res.reason || res.error_code;
++  if (res.error) return res.error;
++  return null;
++}
++
++function cleanRut(value: string) {
++  return value.replace(/[^0-9kK]/g, '').toUpperCase();
++}
++
++function formatRut(value: string) {
++  const c = cleanRut(value);
++  if (c.length < 2) return c;
++  const body = c.slice(0, -1);
++  const dv = c.slice(-1);
++  return body.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + '-' + dv;
++}
++
++function isValidRut(value: string) {
++  const c = cleanRut(value);
++  if (c.length < 2 || !/^\d+$/.test(c.slice(0, -1))) return false;
++  let sum = 0;
++  let factor = 2;
++  for (const d of c.slice(0, -1).split('').reverse()) {
++    sum += Number(d) * factor;
++    factor = factor === 7 ? 2 : factor + 1;
++  }
++  const r = 11 - (sum % 11);
++  const dv = r === 11 ? '0' : r === 10 ? 'K' : String(r);
++  return dv === c.slice(-1);
++}
++
++const STATUS_COLOR: Record<AviaConnection['status'], string> = {
++  connected: theme.noticeTextLight,
++  authorization_required: theme.warningText,
++  error: theme.errorText,
++  disconnected: theme.pageTextSubdued,
++};
++
++function LiveLogin({
++  login,
++  onInput,
++}: {
++  login: AviaLogin;
++  onInput: (input: LoginInput) => void;
++}) {
++  const { t } = useTranslation();
++  const [text, setText] = useState('');
++  const imgRef = useRef<HTMLImageElement>(null);
++
++  const onClick = (e: ReactMouseEvent<HTMLImageElement>) => {
++    const img = imgRef.current;
++    if (!img) return;
++    const rect = img.getBoundingClientRect();
++    const x = ((e.clientX - rect.left) / rect.width) * login.viewport.width;
++    const y = ((e.clientY - rect.top) / rect.height) * login.viewport.height;
++    onInput({ type: 'click', x, y });
++  };
++
++  return (
++    <View style={{ gap: 8 }}>
++      <Information>
++        {login.hint ||
++          t(
++            'The bank asks for an extra step. Complete it on the screen below.',
++          )}
++      </Information>
++      {login.screenshot ? (
++        <img
++          ref={imgRef}
++          src={login.screenshot}
++          alt={t('Bank screen')}
++          onClick={onClick}
++          onWheel={e => onInput({ type: 'scroll', dy: e.deltaY })}
++          style={{
++            width: '100%',
++            border: `1px solid ${theme.tableBorder}`,
++            borderRadius: 4,
++            cursor: 'pointer',
++          }}
++        />
++      ) : (
++        <Text style={{ color: theme.pageTextSubdued }}>
++          <Trans>Loading the bank screen…</Trans>
++        </Text>
++      )}
++      <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
++        <Input
++          placeholder={t('Type here and press Send (e.g. a code)')}
++          value={text}
++          onChangeValue={setText}
++          onEnter={() => {
++            if (text) onInput({ type: 'type', text });
++            onInput({ type: 'key', key: 'Enter' });
++            setText('');
++          }}
++          style={{ flex: 1 }}
++        />
++        <Button
++          onPress={() => {
++            if (text) onInput({ type: 'type', text });
++            setText('');
++          }}
++        >
++          <Trans>Send</Trans>
++        </Button>
++        <Button onPress={() => onInput({ type: 'key', key: 'Enter' })}>
++          <Trans>Enter</Trans>
++        </Button>
++        <Button onPress={() => onInput({ type: 'key', key: 'Tab' })}>
++          <Trans>Tab</Trans>
++        </Button>
++        <Button onPress={() => onInput({ type: 'key', key: 'Backspace' })}>
++          ⌫
++        </Button>
++      </View>
++      <Text style={{ fontSize: 12, color: theme.pageTextSubdued }}>
++        <Trans>
++          Click on the image to interact with the bank page. AVIA never solves
++          verifications on its own.
++        </Trans>
++      </Text>
++    </View>
++  );
++}
++
++export const AviaInitialiseModal = ({
++  onSuccess,
++}: AviaInitialiseModalProps) => {
++  const { t } = useTranslation();
++  const { aviaStatus, isLoading, refresh } = useAviaStatus();
++  const [institution, setInstitution] = useState<string>('');
++  const [rut, setRut] = useState('');
++  const [password, setPassword] = useState('');
++  const [label, setLabel] = useState('');
++  const [busy, setBusy] = useState<string | null>(null);
++  const [error, setError] = useState<string | null>(null);
++  const [login, setLogin] = useState<AviaLogin | null>(null);
++  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
++
++  const institutions: AviaInstitution[] = useMemo(
++    () => aviaStatus.institutions ?? [],
++    [aviaStatus.institutions],
++  );
++  const available = institutions.filter(i => i.available);
++  const blocked = institutions.filter(i => !i.available);
++  const selected = available.find(i => i.id === institution);
++  const isPortal = selected?.authMethod === 'portal_login';
++  const connections = (aviaStatus.connections ?? []).filter(
++    c => c.status !== 'disconnected',
++  );
++  const portalBankIds = new Set(
++    institutions.filter(i => i.authMethod === 'portal_login').map(i => i.id),
++  );
++
++  useEffect(() => {
++    if (!institution && available.length > 0) {
++      const firstReal =
++        available.find(i => i.authMethod === 'portal_login') ?? available[0];
++      setInstitution(firstReal.id);
++    }
++  }, [available, institution]);
++
++  useEffect(
++    () => () => {
++      if (pollRef.current) clearTimeout(pollRef.current);
++    },
++    [],
++  );
++
++  const STATUS_LABEL: Record<AviaConnection['status'], string> = {
++    connected: t('Connected'),
++    authorization_required: t('Login required'),
++    error: t('Error'),
++    disconnected: t('Disconnected'),
++  };
++
++  const poll = useCallback(
++    (id: string) => {
++      const tick = async () => {
++        const res = (await send('avia-login-status', { id })) as AviaLogin;
++        const err = errorOf(res);
++        if (err) {
++          setError(err);
++          setLogin(null);
++          return;
++        }
++        setLogin(res);
++        if (FINAL_STATES.has(res.state)) {
++          if (res.state === 'succeeded') {
++            setPassword('');
++            await refresh();
++            onSuccess();
++          }
++          return;
++        }
++        pollRef.current = setTimeout(
++          tick,
++          res.state === 'needs_user' ? 900 : 1200,
++        );
++      };
++      void tick();
++    },
++    [onSuccess, refresh],
++  );
++
++  async function startLogin(opts: {
++    institution: string;
++    rut?: string;
++    password?: string;
++    label?: string;
++    connectionId?: string;
++  }) {
++    setError(null);
++    setLogin(null);
++    setBusy(opts.connectionId ? `relogin-${opts.connectionId}` : 'login');
++    try {
++      const res = (await send('avia-login-start', opts)) as AviaLogin;
++      const err = errorOf(res);
++      if (err) {
++        setError(err);
++        return;
++      }
++      setLogin(res);
++      poll(res.id);
++    } finally {
++      setBusy(null);
++    }
++  }
++
++  async function run(key: string, fn: () => Promise<AviaResponse>) {
++    setBusy(key);
++    setError(null);
++    try {
++      const err = errorOf(await fn());
++      if (err) {
++        setError(err);
++        return false;
++      }
++      await refresh();
++      return true;
++    } finally {
++      setBusy(null);
++    }
++  }
++
++  const sendInput = (input: LoginInput) => {
++    if (login) void send('avia-login-input', { id: login.id, input });
++  };
++
++  const loginActive = login && !FINAL_STATES.has(login.state);
++  const rutOk = isValidRut(rut);
++
++  return (
++    <Modal
++      name="avia-init"
++      containerProps={{
++        style: { width: login?.state === 'needs_user' ? 820 : 580 },
++      }}
++    >
++      {({ state }) => (
++        <>
++          <ModalHeader
++            title={t('Chilean banks')}
++            rightContent={<ModalCloseButton onPress={() => state.close()} />}
++          />
++          <View style={{ gap: 12 }}>
++            {!isLoading && !aviaStatus.reachable && (
++              <ErrorAlert>
++                {aviaStatus.reason ||
++                  t(
++                    'The AVIA service is not reachable. Check AVIA_SERVER_URL and AVIA_API_TOKEN on the Actual server.',
++                  )}
++              </ErrorAlert>
++            )}
++
++            {login ? (
++              <View style={{ gap: 10 }}>
++                <Text style={{ fontWeight: 600 }}>
++                  {login.bankName} · {login.rut}
++                </Text>
++                {login.state === 'needs_user' ? (
++                  <LiveLogin login={login} onInput={sendInput} />
++                ) : login.state === 'succeeded' ? (
++                  <Information>
++                    <Trans>
++                      Signed in. The session is stored encrypted in AVIA.
++                    </Trans>
++                  </Information>
++                ) : FINAL_STATES.has(login.state) ? (
++                  <ErrorAlert>{login.message}</ErrorAlert>
++                ) : (
++                  <Text>{login.message}</Text>
++                )}
++                {loginActive && login.state === 'needs_user' && (
++                  <Text style={{ fontSize: 12, color: theme.pageTextSubdued }}>
++                    {login.message}
++                  </Text>
++                )}
++              </View>
++            ) : (
++              <>
++                {connections.length > 0 && (
++                  <View style={{ gap: 6 }}>
++                    <Text style={{ fontWeight: 600 }}>
++                      <Trans>Connections</Trans>
++                    </Text>
++                    {connections.map(c => (
++                      <View
++                        key={c.id}
++                        style={{
++                          flexDirection: 'row',
++                          alignItems: 'center',
++                          gap: 8,
++                          padding: '6px 8px',
++                          border: `1px solid ${theme.tableBorder}`,
++                          borderRadius: 4,
++                        }}
++                      >
++                        <View style={{ flex: 1 }}>
++                          <Text>
++                            {c.bank} · {c.label}
++                          </Text>
++                          <Text
++                            style={{
++                              fontSize: 12,
++                              color: STATUS_COLOR[c.status],
++                            }}
++                          >
++                            {STATUS_LABEL[c.status]}
++                            {c.last_success_at
++                              ? ' · ' +
++                                t('Last sync: {{date}}', {
++                                  date: new Date(
++                                    c.last_success_at,
++                                  ).toLocaleString(),
++                                })
++                              : ''}
++                          </Text>
++                          {c.last_error && (
++                            <Text
++                              style={{ fontSize: 12, color: theme.errorText }}
++                            >
++                              {c.last_error}
++                            </Text>
++                          )}
++                        </View>
++                        {portalBankIds.has(c.bank_id) && (
++                          <ButtonWithLoading
++                            isLoading={busy === `relogin-${c.id}`}
++                            onPress={() =>
++                              void startLogin({
++                                institution: c.bank_id,
++                                connectionId: c.id,
++                              })
++                            }
++                          >
++                            <Trans>Sign in again</Trans>
++                          </ButtonWithLoading>
++                        )}
++                        <ButtonWithLoading
++                          variant="bare"
++                          isLoading={busy === `del-${c.id}`}
++                          onPress={() =>
++                            void run(`del-${c.id}`, () =>
++                              send('avia-connection-delete', { id: c.id }),
++                            )
++                          }
++                        >
++                          <Trans>Remove</Trans>
++                        </ButtonWithLoading>
++                      </View>
++                    ))}
++                  </View>
++                )}
++
++                {available.length > 0 && (
++                  <View style={{ gap: 8 }}>
++                    <Text style={{ fontWeight: 600 }}>
++                      <Trans>Connect a bank</Trans>
++                    </Text>
++                    <FormField>
++                      <FormLabel title={t('Bank:')} htmlFor="avia-inst" />
++                      <Select
++                        id="avia-inst"
++                        options={available.map(i => [i.id, i.name] as const)}
++                        value={institution}
++                        onChange={setInstitution}
++                      />
++                    </FormField>
++                    {selected?.testData && (
++                      <Information>
++                        <Trans>
++                          This institution only contains fictitious data for
++                          testing. Use a test budget file.
++                        </Trans>
++                      </Information>
++                    )}
++                    {isPortal && (
++                      <>
++                        <FormField>
++                          <FormLabel title={t('RUT:')} htmlFor="avia-rut" />
++                          <Input
++                            id="avia-rut"
++                            placeholder="12.345.678-9"
++                            value={rut}
++                            onChangeValue={v => setRut(formatRut(v))}
++                            autoComplete="off"
++                          />
++                          {rut.length > 3 && !rutOk && (
++                            <Text
++                              style={{ fontSize: 12, color: theme.errorText }}
++                            >
++                              <Trans>Invalid RUT</Trans>
++                            </Text>
++                          )}
++                        </FormField>
++                        <FormField>
++                          <FormLabel
++                            title={t('Password:')}
++                            htmlFor="avia-password"
++                          />
++                          <Input
++                            id="avia-password"
++                            type="password"
++                            value={password}
++                            onChangeValue={setPassword}
++                            autoComplete="off"
++                          />
++                        </FormField>
++                        <Text
++                          style={{ fontSize: 12, color: theme.pageTextSubdued }}
++                        >
++                          <Trans>
++                            AVIA signs in on the bank website with these
++                            credentials and stores them encrypted on your
++                            server. If the bank asks for Mi Pass or a code, you
++                            approve it here.
++                          </Trans>
++                        </Text>
++                      </>
++                    )}
++                    <FormField>
++                      <FormLabel
++                        title={t('Connection name (optional):')}
++                        htmlFor="avia-label"
++                      />
++                      <Input
++                        id="avia-label"
++                        value={label}
++                        onChangeValue={setLabel}
++                      />
++                    </FormField>
++                    {selected?.reason && <Warning>{selected.reason}</Warning>}
++                  </View>
++                )}
++
++                {blocked.length > 0 && (
++                  <Warning>
++                    <View style={{ gap: 4 }}>
++                      {blocked.map(i => (
++                        <Text key={i.id} style={{ fontSize: 12 }}>
++                          <strong>{i.name}:</strong> {i.reason}
++                        </Text>
++                      ))}
++                    </View>
++                  </Warning>
++                )}
++              </>
++            )}
++
++            {error && <ErrorAlert>{error}</ErrorAlert>}
++          </View>
++
++          <ModalButtons>
++            {login ? (
++              loginActive ? (
++                <Button
++                  onPress={() => {
++                    sendInput({ type: 'cancel' });
++                  }}
++                >
++                  <Trans>Cancel sign-in</Trans>
++                </Button>
++              ) : (
++                <>
++                  <Button
++                    onPress={() => setLogin(null)}
++                    style={{ marginRight: 10 }}
++                  >
++                    <Trans>Back</Trans>
++                  </Button>
++                  <Button variant="primary" onPress={() => state.close()}>
++                    <Trans>Done</Trans>
++                  </Button>
++                </>
++              )
++            ) : (
++              <>
++                <Button
++                  onPress={() => state.close()}
++                  style={{ marginRight: 10 }}
++                >
++                  <Trans>Close</Trans>
++                </Button>
++                {available.length > 0 &&
++                  (isPortal ? (
++                    <ButtonWithLoading
++                      variant="primary"
++                      isDisabled={!rutOk || !password || !aviaStatus.reachable}
++                      isLoading={busy === 'login'}
++                      onPress={() =>
++                        void startLogin({
++                          institution,
++                          rut,
++                          password,
++                          label: label || undefined,
++                        })
++                      }
++                    >
++                      <Trans>Sign in to the bank</Trans>
++                    </ButtonWithLoading>
++                  ) : (
++                    <ButtonWithLoading
++                      variant="primary"
++                      isDisabled={!institution || !aviaStatus.reachable}
++                      isLoading={busy === 'create'}
++                      onPress={() =>
++                        void run('create', () =>
++                          send('avia-connection-create', {
++                            institution,
++                            label: label || undefined,
++                            params: {},
++                          }),
++                        ).then(ok => {
++                          if (ok) {
++                            onSuccess();
++                            state.close();
++                          }
++                        })
++                      }
++                    >
++                      <Trans>Connect</Trans>
++                    </ButtonWithLoading>
++                  ))}
++              </>
++            )}
++          </ModalButtons>
++        </>
++      )}
++    </Modal>
++  );
++};
+diff --git a/packages/desktop-client/src/components/modals/SelectLinkedAccountsModal.tsx b/packages/desktop-client/src/components/modals/SelectLinkedAccountsModal.tsx
+index 348736a8f..9f56698bb 100644
+--- a/packages/desktop-client/src/components/modals/SelectLinkedAccountsModal.tsx
++++ b/packages/desktop-client/src/components/modals/SelectLinkedAccountsModal.tsx
+@@ -15,6 +15,7 @@ import { currentDay, subDays } from '@actual-app/core/shared/months';
+ import type {
+   AccountEntity,
+   SyncServerAkahuAccount,
++  SyncServerAviaAccount,
+   SyncServerEnableBankingAccount,
+   SyncServerGoCardlessAccount,
+   SyncServerPluggyAiAccount,
+@@ -24,6 +25,7 @@ import { format as formatDate, parseISO } from 'date-fns';
+ 
+ import {
+   useLinkAccountAkahuMutation,
++  useLinkAccountAviaMutation,
+   useLinkAccountEnableBankingMutation,
+   useLinkAccountMutation,
+   useLinkAccountPluggyAiMutation,
+@@ -192,6 +194,12 @@ export type SelectLinkedAccountsModalProps =
+       externalAccounts: SyncServerAkahuAccount[];
+       syncSource: 'akahu';
+       upgradingAccountId?: string;
++    }
++  | {
++      requisitionId?: undefined;
++      externalAccounts: SyncServerAviaAccount[];
++      syncSource: 'avia';
++      upgradingAccountId?: string;
+     };
+ 
+ export function SelectLinkedAccountsModal({
+@@ -227,6 +235,12 @@ export function SelectLinkedAccountsModal({
+             externalAccounts: toSort as SyncServerAkahuAccount[],
+             upgradingAccountId,
+           };
++        case 'avia':
++          return {
++            syncSource: 'avia',
++            externalAccounts: toSort as SyncServerAviaAccount[],
++            upgradingAccountId,
++          };
+         case 'goCardless':
+           return {
+             syncSource: 'goCardless',
+@@ -281,6 +295,7 @@ export function SelectLinkedAccountsModal({
+   const linkAccountSimpleFin = useLinkAccountSimpleFinMutation();
+   const linkAccountPluggyAi = useLinkAccountPluggyAiMutation();
+   const linkAccountAkahu = useLinkAccountAkahuMutation();
++  const linkAccountAvia = useLinkAccountAviaMutation();
+   const linkAccountEnableBanking = useLinkAccountEnableBankingMutation();
+ 
+   async function onNext() {
+@@ -343,6 +358,21 @@ export function SelectLinkedAccountsModal({
+             startingDate,
+             startingBalance,
+           });
++        } else if (propsWithSortedExternalAccounts.syncSource === 'avia') {
++          linkAccountAvia.mutate({
++            externalAccount:
++              propsWithSortedExternalAccounts.externalAccounts[
++                externalAccountIndex
++              ],
++            upgradingId:
++              chosenLocalAccountId !== addOnBudgetAccountOption.id &&
++              chosenLocalAccountId !== addOffBudgetAccountOption.id
++                ? chosenLocalAccountId
++                : undefined,
++            offBudget,
++            startingDate,
++            startingBalance,
++          });
+         } else if (propsWithSortedExternalAccounts.syncSource === 'akahu') {
+           linkAccountAkahu.mutate({
+             externalAccount:
+@@ -419,7 +449,8 @@ export function SelectLinkedAccountsModal({
+       | SyncServerGoCardlessAccount
+       | SyncServerSimpleFinAccount
+       | SyncServerPluggyAiAccount
+-      | SyncServerAkahuAccount,
++      | SyncServerAkahuAccount
++      | SyncServerAviaAccount,
+     localAccountId: string | null | undefined,
+   ) {
+     setChosenAccounts(accounts => {
+@@ -645,6 +676,7 @@ type ExternalAccount =
+   | SyncServerSimpleFinAccount
+   | SyncServerPluggyAiAccount
+   | SyncServerAkahuAccount
++  | SyncServerAviaAccount
+   | SyncServerEnableBankingAccount;
+ 
+ type StartingBalanceInfo = {
+diff --git a/packages/desktop-client/src/hooks/useAviaStatus.ts b/packages/desktop-client/src/hooks/useAviaStatus.ts
+new file mode 100644
+index 000000000..33b33002e
+--- /dev/null
++++ b/packages/desktop-client/src/hooks/useAviaStatus.ts
+@@ -0,0 +1,36 @@
++import { useCallback, useEffect, useState } from 'react';
++
++import { send } from '@actual-app/core/platform/client/connection';
++import type { AviaStatus } from '@actual-app/core/types/models';
++
++import { useSyncServerStatus } from './useSyncServerStatus';
++
++const EMPTY: AviaStatus = {
++  configured: false,
++  reachable: false,
++  state: 'not_configured',
++};
++
++export function useAviaStatus() {
++  const [aviaStatus, setAviaStatus] = useState<AviaStatus>(EMPTY);
++  const [isLoading, setIsLoading] = useState(false);
++  const status = useSyncServerStatus();
++
++  const refresh = useCallback(async () => {
++    setIsLoading(true);
++    try {
++      const results = (await send('avia-status')) as AviaStatus;
++      setAviaStatus(results && !results.error ? results : EMPTY);
++    } finally {
++      setIsLoading(false);
++    }
++  }, []);
++
++  useEffect(() => {
++    if (status === 'online') {
++      void refresh();
++    }
++  }, [status, refresh]);
++
++  return { aviaStatus, isLoading, refresh };
++}
+diff --git a/packages/desktop-client/src/modals/modalsSlice.ts b/packages/desktop-client/src/modals/modalsSlice.ts
+index d9763f635..4e8c9d52f 100644
+--- a/packages/desktop-client/src/modals/modalsSlice.ts
++++ b/packages/desktop-client/src/modals/modalsSlice.ts
+@@ -145,6 +145,12 @@ export type Modal =
+         onSuccess: () => void;
+       };
+     }
++  | {
++      name: 'avia-init';
++      options: {
++        onSuccess: () => void;
++      };
++    }
+   | {
+       name: 'enablebanking-init';
+       options: {
+diff --git a/packages/loot-core/src/server/accounts/app.ts b/packages/loot-core/src/server/accounts/app.ts
+index c68f3d21c..0f65a4cec 100644
+--- a/packages/loot-core/src/server/accounts/app.ts
++++ b/packages/loot-core/src/server/accounts/app.ts
+@@ -33,6 +33,7 @@ import type {
+   GoCardlessToken,
+   ImportTransactionEntity,
+   SyncServerAkahuAccount,
++  SyncServerAviaAccount,
+   SyncServerEnableBankingAccount,
+   SyncServerGoCardlessAccount,
+   SyncServerPluggyAiAccount,
+@@ -61,6 +62,7 @@ export type AccountHandlers = {
+   'simplefin-accounts-link': typeof linkSimpleFinAccount;
+   'pluggyai-accounts-link': typeof linkPluggyAiAccount;
+   'akahu-accounts-link': typeof linkAkahuAccount;
++  'avia-accounts-link': typeof linkAviaAccount;
+   'enablebanking-accounts-link': typeof linkEnableBankingAccount;
+   'account-create': typeof createAccount;
+   'account-close': typeof closeAccount;
+@@ -84,6 +86,15 @@ export type AccountHandlers = {
+   'simplefin-accounts': typeof simpleFinAccounts;
+   'pluggyai-accounts': typeof pluggyAiAccounts;
+   'akahu-accounts': typeof akahuAccounts;
++  'avia-status': typeof aviaStatus;
++  'avia-accounts': typeof aviaAccounts;
++  'avia-sync': typeof aviaSync;
++  'avia-connection-create': typeof aviaConnectionCreate;
++  'avia-connection-delete': typeof aviaConnectionDelete;
++  'avia-connection-reauthorize': typeof aviaConnectionReauthorize;
++  'avia-login-start': typeof aviaLoginStart;
++  'avia-login-status': typeof aviaLoginStatus;
++  'avia-login-input': typeof aviaLoginInput;
+   'gocardless-get-banks': typeof getGoCardlessBanks;
+   'gocardless-create-web-token': typeof createGoCardlessWebToken;
+   'accounts-bank-sync': typeof accountsBankSync;
+@@ -469,6 +480,196 @@ async function linkAkahuAccount({
+   return 'ok';
+ }
+ 
++// ---------------------------------------------------------------------------
++// AVIA Bank Sync (proveedor propio de Avia Rockets). Mismo patrón que Akahu:
++// el cliente habla con el sync-server (/avia/*), que hace de proxy al servicio
++// AVIA en la red Docker interna.
++// ---------------------------------------------------------------------------
++async function linkAviaAccount({
++  externalAccount,
++  upgradingId,
++  offBudget = false,
++  startingDate,
++  startingBalance,
++}: LinkAccountBaseParams & {
++  externalAccount: SyncServerAviaAccount;
++}) {
++  let id;
++
++  const bank = await link.findOrCreateBank(
++    { name: externalAccount.institution ?? 'AVIA Bank Sync' },
++    `avia:${externalAccount.orgId ?? externalAccount.institution ?? 'avia'}`,
++  );
++
++  if (upgradingId) {
++    const accRow = await db.first<db.DbAccount>(
++      'SELECT * FROM accounts WHERE id = ?',
++      [upgradingId],
++    );
++
++    if (!accRow) {
++      throw new Error(`Account with ID ${upgradingId} not found.`);
++    }
++
++    id = accRow.id;
++    await db.update('accounts', {
++      id,
++      account_id: externalAccount.account_id,
++      bank: bank.id,
++      account_sync_source: 'avia',
++    });
++  } else {
++    // Evita cuentas duplicadas si el flujo se repite sobre la misma cuenta bancaria
++    const existing = await db.first<db.DbAccount>(
++      "SELECT * FROM accounts WHERE account_id = ? AND account_sync_source = 'avia' AND tombstone = 0",
++      [externalAccount.account_id],
++    );
++    if (existing) {
++      throw new Error(
++        `La cuenta bancaria ya está vinculada a «${existing.name}» en Actual.`,
++      );
++    }
++    id = uuidv4();
++    await db.insertWithUUID('accounts', {
++      id,
++      account_id: externalAccount.account_id,
++      name: externalAccount.name,
++      official_name: externalAccount.name,
++      bank: bank.id,
++      offbudget: offBudget ? 1 : 0,
++      account_sync_source: 'avia',
++    });
++    await db.insertPayee({
++      name: '',
++      transfer_acct: id,
++    });
++  }
++
++  const syncRes = await bankSync.syncAccount(
++    undefined,
++    undefined,
++    id,
++    externalAccount.account_id,
++    bank.bank_id,
++    startingDate,
++    startingBalance,
++  );
++
++  await handleSyncResponse(syncRes, id);
++
++  connection.send('sync-event', {
++    type: 'success',
++    tables: ['transactions', 'accounts'],
++  });
++
++  return 'ok';
++}
++
++async function aviaPost(path: string, body: Record<string, unknown> = {}) {
++  const userToken = await asyncStorage.getItem('user-token');
++  if (!userToken) {
++    return { error: 'unauthorized' };
++  }
++  const serverConfig = getServer();
++  if (!serverConfig) {
++    throw new Error('Failed to get server config.');
++  }
++  try {
++    return await post(
++      serverConfig.AVIA_SERVER + path,
++      body,
++      { 'X-ACTUAL-TOKEN': userToken },
++      60000,
++    );
++  } catch {
++    return { error_code: 'TIMED_OUT' };
++  }
++}
++
++async function aviaStatus() {
++  return aviaPost('/status');
++}
++
++async function aviaAccounts() {
++  return aviaPost('/accounts');
++}
++
++async function aviaSync({
++  trigger = 'manual',
++  onlyIfStale = false,
++}: { trigger?: 'manual' | 'actual_open'; onlyIfStale?: boolean } = {}) {
++  return aviaPost('/sync', { trigger, onlyIfStale });
++}
++
++async function aviaConnectionCreate({
++  institution,
++  label,
++  params,
++}: {
++  institution: string;
++  label?: string;
++  params?: Record<string, unknown>;
++}) {
++  return aviaPost('/connections/create', { institution, label, params });
++}
++
++async function aviaConnectionDelete({ id }: { id: string }) {
++  return aviaPost('/connections/delete', { id });
++}
++
++async function aviaConnectionReauthorize({
++  id,
++  params,
++}: {
++  id: string;
++  params?: Record<string, unknown>;
++}) {
++  return aviaPost('/connections/reauthorize', { id, params });
++}
++
++async function aviaLoginStart({
++  institution,
++  rut,
++  password,
++  label,
++  connectionId,
++}: {
++  institution: string;
++  rut?: string;
++  password?: string;
++  label?: string;
++  connectionId?: string;
++}) {
++  return aviaPost('/logins/start', {
++    institution,
++    rut,
++    password,
++    label,
++    connectionId,
++  });
++}
++
++async function aviaLoginStatus({ id }: { id: string }) {
++  return aviaPost('/logins/status', { id });
++}
++
++type AviaLoginInputCommand =
++  | { type: 'click'; x: number; y: number }
++  | { type: 'type'; text: string }
++  | { type: 'key'; key: string }
++  | { type: 'scroll'; dy: number }
++  | { type: 'cancel' };
++
++async function aviaLoginInput({
++  id,
++  input,
++}: {
++  id: string;
++  input: AviaLoginInputCommand;
++}) {
++  return aviaPost('/logins/input', { id, input });
++}
++
+ async function linkEnableBankingAccount({
+   externalAccount,
+   upgradingId,
+@@ -1724,6 +1925,11 @@ async function unlinkAccount({ id }: { id: AccountEntity['id'] }) {
+ 
+   const isGoCardless = accRow.account_sync_source === 'goCardless';
+ 
++  if (accRow.account_sync_source === 'avia') {
++    // Mantener la tabla account_mappings de AVIA consistente. No bloquea el desvínculo.
++    void aviaPost('/unlink', { actualAccountId: id });
++  }
++
+   await db.updateAccount({
+     id,
+     account_id: null,
+@@ -1796,6 +2002,7 @@ app.method('gocardless-accounts-link', linkGoCardlessAccount);
+ app.method('simplefin-accounts-link', linkSimpleFinAccount);
+ app.method('pluggyai-accounts-link', linkPluggyAiAccount);
+ app.method('akahu-accounts-link', linkAkahuAccount);
++app.method('avia-accounts-link', linkAviaAccount);
+ app.method('enablebanking-accounts-link', linkEnableBankingAccount);
+ app.method('account-create', mutator(undoable(createAccount)));
+ app.method('account-close', mutator(closeAccount));
+@@ -1819,6 +2026,15 @@ app.method('enablebanking-configure', enableBankingConfigure);
+ app.method('simplefin-accounts', simpleFinAccounts);
+ app.method('pluggyai-accounts', pluggyAiAccounts);
+ app.method('akahu-accounts', akahuAccounts);
++app.method('avia-status', aviaStatus);
++app.method('avia-accounts', aviaAccounts);
++app.method('avia-sync', aviaSync);
++app.method('avia-connection-create', aviaConnectionCreate);
++app.method('avia-connection-delete', aviaConnectionDelete);
++app.method('avia-connection-reauthorize', aviaConnectionReauthorize);
++app.method('avia-login-start', aviaLoginStart);
++app.method('avia-login-status', aviaLoginStatus);
++app.method('avia-login-input', aviaLoginInput);
+ app.method('gocardless-get-banks', getGoCardlessBanks);
+ app.method('gocardless-create-web-token', createGoCardlessWebToken);
+ app.method('accounts-bank-sync', accountsBankSync);
+diff --git a/packages/loot-core/src/server/accounts/sync-avia.test.ts b/packages/loot-core/src/server/accounts/sync-avia.test.ts
+new file mode 100644
+index 000000000..312ed0ee9
+--- /dev/null
++++ b/packages/loot-core/src/server/accounts/sync-avia.test.ts
+@@ -0,0 +1,228 @@
++// @ts-strict-ignore
++// AVIA Bank Sync: pruebas del camino de sincronización dentro de Actual.
++import * as asyncStorage from '#platform/server/asyncStorage';
++import * as db from '#server/db';
++import { loadMappings } from '#server/db/mappings';
++import { handlers } from '#server/tests/mockSyncServer';
++import { loadRules } from '#server/transactions/transaction-rules';
++import * as monthUtils from '#shared/months';
++
++import { syncAccount } from './sync';
++
++vi.mock('#shared/months', async () => ({
++  ...(await vi.importActual('#shared/months')),
++  currentDay: vi.fn(),
++  currentMonth: vi.fn(),
++}));
++
++const tx = (
++  id: string,
++  date: string,
++  amount: string,
++  payeeName: string,
++  extra: Record<string, unknown> = {},
++) => ({
++  transactionId: id,
++  booked: true,
++  date,
++  payeeName,
++  notes: null,
++  transactionAmount: { amount, currency: 'CLP' },
++  ...extra,
++});
++
++function response(txs, bookedBalanceInteger: number) {
++  return {
++    balances: [],
++    startingBalance: bookedBalanceInteger,
++    transactions: {
++      all: txs,
++      booked: txs.filter(t => t.booked),
++      pending: txs.filter(t => !t.booked),
++    },
++  };
++}
++
++let lastBody = null;
++function mockAvia(byAccount: Record<string, unknown>) {
++  handlers['/avia/transactions'] = data => {
++    lastBody = data;
++    return byAccount[data.accountId];
++  };
++}
++
++function txnsFor(account: string) {
++  return db.all<db.DbViewTransactionInternal>(
++    'SELECT * FROM v_transactions_internal WHERE account = ? AND tombstone = 0 ORDER BY date DESC, amount',
++    [account],
++  );
++}
++
++beforeEach(async () => {
++  vi.resetAllMocks();
++  vi.mocked(monthUtils.currentDay).mockReturnValue('2017-10-15');
++  vi.mocked(monthUtils.currentMonth).mockReturnValue('2017-10');
++  vi.mocked(asyncStorage.getItem).mockResolvedValue('test-token');
++  await global.emptyDatabase()();
++  await loadMappings();
++  await loadRules();
++  db.runQuery(
++    'INSERT INTO banks (id, bank_id, name, tombstone) VALUES (?, ?, ?, 0)',
++    ['bank1', 'avia:sandbox', 'AVIA Sandbox'],
++  );
++  for (const [id, ext, name] of [
++    ['cc', 'ext-cc', 'Cuenta Corriente'],
++    ['tc', 'ext-tc', 'Tarjeta'],
++  ]) {
++    await db.insertAccount({
++      id,
++      name,
++      bank: 'bank1',
++      account_id: ext,
++      account_sync_source: 'avia',
++    });
++    await db.insertPayee({ name: '', transfer_acct: id });
++  }
++});
++
++afterEach(() => {
++  delete handlers['/avia/transactions'];
++});
++
++const checkingTxns = () => [
++  tx('avia:s:cc:P1', '2017-10-14', '-5000.00', 'UBER', { booked: false }),
++  tx('avia:s:cc:B2', '2017-10-05', '-150000.00', 'TARJETA ****4242', {
++    aviaTransferAccountId: 'tc',
++  }),
++  tx('avia:s:cc:B3', '2017-10-03', '-20000.00', 'JUMBO'),
++];
++
++describe('AVIA bank sync', () => {
++  test('initial sync: booked-only starting balance, card payment as transfer', async () => {
++    mockAvia({ 'ext-cc': response(checkingTxns(), 100000000) });
++    await syncAccount(undefined, undefined, 'cc', 'ext-cc', 'avia:sandbox');
++
++    expect(lastBody).toMatchObject({
++      accountId: 'ext-cc',
++      actualAccountId: 'cc',
++    });
++
++    const cc = await txnsFor('cc');
++    const starting = cc.find(t => t.starting_balance_flag);
++    // 1.000.000 contable - (-150.000 - 20.000) contabilizados = 1.170.000 (x100)
++    expect(starting.amount).toBe(117000000);
++    // saldo final en Actual = contable + pendiente
++    expect(cc.reduce((s, t) => s + t.amount, 0)).toBe(100000000 - 500000);
++
++    const payment = cc.find(t => t.imported_id === 'avia:s:cc:B2');
++    const tcPayee = await db.first<{ id: string }>(
++      'SELECT id FROM payees WHERE transfer_acct = ?',
++      ['tc'],
++    );
++    expect(payment.payee).toBe(tcPayee.id);
++    expect(payment.transfer_id).toBeTruthy();
++
++    // Actual creó la contrapartida en la tarjeta: el pago no es un gasto
++    const tc = await txnsFor('tc');
++    expect(tc).toHaveLength(1);
++    expect(tc[0].amount).toBe(15000000);
++
++    const pending = cc.find(t => t.imported_id === 'avia:s:cc:P1');
++    expect(Boolean(pending.cleared)).toBe(false);
++  });
++
++  test('re-sync is idempotent and pending -> booked updates in place', async () => {
++    mockAvia({ 'ext-cc': response(checkingTxns(), 100000000) });
++    await syncAccount(undefined, undefined, 'cc', 'ext-cc', 'avia:sandbox');
++    const before = (await txnsFor('cc')).length;
++
++    await syncAccount(undefined, undefined, 'cc', 'ext-cc', 'avia:sandbox');
++    expect(await txnsFor('cc')).toHaveLength(before);
++
++    // AVIA conserva el mismo transactionId al contabilizar el pendiente
++    const promoted = checkingTxns().map(t =>
++      t.transactionId === 'avia:s:cc:P1'
++        ? { ...t, booked: true, date: '2017-10-15' }
++        : t,
++    );
++    mockAvia({ 'ext-cc': response(promoted, 99500000) });
++    await syncAccount(undefined, undefined, 'cc', 'ext-cc', 'avia:sandbox');
++    const after = await txnsFor('cc');
++    expect(after).toHaveLength(before);
++    expect(
++      Boolean(after.find(t => t.imported_id === 'avia:s:cc:P1').cleared),
++    ).toBe(true);
++  });
++
++  test('card-side payment matches the transfer instead of duplicating it', async () => {
++    mockAvia({
++      'ext-cc': response(checkingTxns(), 100000000),
++      'ext-tc': response(
++        [
++          tx('avia:s:tc:B9', '2017-10-12', '-9490.00', 'NETFLIX'),
++          tx('avia:s:tc:B8', '2017-10-05', '150000.00', 'PAGO RECIBIDO'),
++        ],
++        -2000000,
++      ),
++    });
++    await syncAccount(undefined, undefined, 'cc', 'ext-cc', 'avia:sandbox');
++    await syncAccount(undefined, undefined, 'tc', 'ext-tc', 'avia:sandbox');
++    const tc = await txnsFor('tc');
++    expect(tc.filter(t => t.amount === 15000000)).toHaveLength(1);
++    expect(tc.filter(t => t.amount === -949000)).toHaveLength(1);
++  });
++
++  test('card linked first: existing counterpart is linked, not duplicated', async () => {
++    const withPeer = checkingTxns().map(t =>
++      t.transactionId === 'avia:s:cc:B2'
++        ? { ...t, aviaTransferPeerId: 'avia:s:tc:B8' }
++        : t,
++    );
++    mockAvia({
++      'ext-cc': response(withPeer, 100000000),
++      'ext-tc': response(
++        [tx('avia:s:tc:B8', '2017-10-05', '150000.00', 'PAGO RECIBIDO')],
++        -2000000,
++      ),
++    });
++    await syncAccount(undefined, undefined, 'tc', 'ext-tc', 'avia:sandbox');
++    await syncAccount(undefined, undefined, 'cc', 'ext-cc', 'avia:sandbox');
++
++    const tc = (await txnsFor('tc')).filter(t => !t.starting_balance_flag);
++    expect(tc.filter(t => t.amount === 15000000)).toHaveLength(1);
++    const cardSide = tc.find(t => t.amount === 15000000);
++    const bankSide = (await txnsFor('cc')).find(
++      t => t.imported_id === 'avia:s:cc:B2',
++    );
++    expect(bankSide.transfer_id).toBe(cardSide.id);
++    expect(cardSide.transfer_id).toBe(bankSide.id);
++    const ccPayee = await db.first<{ id: string }>(
++      'SELECT id FROM payees WHERE transfer_acct = ?',
++      ['cc'],
++    );
++    expect(cardSide.payee).toBe(ccPayee.id);
++
++    // re-sincronizar no rompe ni duplica el enlace
++    await syncAccount(undefined, undefined, 'cc', 'ext-cc', 'avia:sandbox');
++    expect(
++      (await txnsFor('tc')).filter(t => t.amount === 15000000),
++    ).toHaveLength(1);
++  });
++
++  test('reauthorization errors surface as ITEM_LOGIN_REQUIRED', async () => {
++    mockAvia({
++      'ext-cc': {
++        error_type: 'ITEM_ERROR',
++        error_code: 'ITEM_LOGIN_REQUIRED',
++        reason: 'Se requiere reautorización',
++      },
++    });
++    await expect(
++      syncAccount(undefined, undefined, 'cc', 'ext-cc', 'avia:sandbox'),
++    ).rejects.toMatchObject({
++      type: 'BankSyncError',
++      category: 'ITEM_ERROR',
++      code: 'ITEM_LOGIN_REQUIRED',
++    });
++  });
++});
+diff --git a/packages/loot-core/src/server/accounts/sync.ts b/packages/loot-core/src/server/accounts/sync.ts
+index 409775bf3..5f743e030 100644
+--- a/packages/loot-core/src/server/accounts/sync.ts
++++ b/packages/loot-core/src/server/accounts/sync.ts
+@@ -357,6 +357,160 @@ async function downloadAkahuTransactions(
+   return retVal;
+ }
+ 
++type AviaLinkRow = { id: string; transfer_id: string | null; amount: number };
++
++type AviaTransferLink = {
++  importedId: string;
++  peerId: string;
++  targetAccount: string;
++  targetPayee: string;
++};
++
++async function linkAviaTransfers(
++  acctId: AccountEntity['id'],
++  links: AviaTransferLink[],
++) {
++  if (!links?.length) return;
++  const own = await db.first<{ id: string }>(
++    'SELECT id FROM payees WHERE transfer_acct = ? AND tombstone = 0',
++    [acctId],
++  );
++  if (!own) return;
++  const updated = [];
++  for (const link of links) {
++    const trans = await db.first<AviaLinkRow>(
++      'SELECT id, transfer_id, amount FROM v_transactions_internal WHERE account = ? AND imported_id = ? AND tombstone = 0',
++      [acctId, link.importedId],
++    );
++    const peer = await db.first<AviaLinkRow>(
++      'SELECT id, transfer_id, amount FROM v_transactions_internal WHERE id = ? AND tombstone = 0',
++      [link.peerId],
++    );
++    if (!trans || !peer || trans.transfer_id || peer.transfer_id) continue;
++    if (trans.amount !== -peer.amount) continue;
++    // Igual que «Make transfer»: la categoría solo se limpia si ambas cuentas
++    // son del mismo tipo (ambas dentro o ambas fuera del presupuesto).
++    const budgets = await db.all<{ offbudget: number }>(
++      'SELECT offbudget FROM accounts WHERE id IN (?, ?)',
++      [acctId, link.targetAccount],
++    );
++    const clear =
++      budgets.length === 2 && budgets[0].offbudget === budgets[1].offbudget;
++    updated.push(
++      {
++        id: trans.id,
++        payee: link.targetPayee,
++        transfer_id: peer.id,
++        ...(clear ? { category: null } : {}),
++      },
++      {
++        id: peer.id,
++        payee: own.id,
++        transfer_id: trans.id,
++        ...(clear ? { category: null } : {}),
++      },
++    );
++  }
++  if (updated.length) {
++    await runMutator(() =>
++      batchUpdateTransactions({ updated, runTransfers: false }),
++    );
++  }
++}
++
++// AVIA Bank Sync: el servicio AVIA ya deduplica, normaliza y concilia; aquí solo
++// se traduce su respuesta al contrato BankSyncResponse. Los pagos de tarjeta
++// emparejados por AVIA llegan con `aviaTransferAccountId` (cuenta Actual de la
++// tarjeta) y se registran con el payee de transferencia de esa cuenta, de modo
++// que Actual crea la contrapartida y no los cuenta como gasto.
++async function downloadAviaTransactions(
++  acctId: AccountEntity['id'],
++  since: string,
++  actualAccountId: AccountEntity['id'],
++) {
++  const userToken = await asyncStorage.getItem('user-token');
++  if (!userToken) return;
++
++  logger.log('Pulling transactions from AVIA Bank Sync');
++
++  const res = await post(
++    getServer().AVIA_SERVER + '/transactions',
++    {
++      accountId: acctId,
++      startDate: since,
++      actualAccountId,
++    },
++    {
++      'X-ACTUAL-TOKEN': userToken,
++    },
++    120000,
++  );
++
++  if (res.error_code) {
++    throw BankSyncError(res.error_type, res.error_code, { reason: res.reason });
++  } else if ('error' in res) {
++    throw BankSyncError('Connection', res.error);
++  }
++
++  const singleRes = res as BankSyncResponse;
++  const transferPayees = new Map<string, string | null>();
++  // Pares cuya contrapartida YA existe en la otra cuenta (se importó antes por su
++  // propio bank sync): no se fija el payee (crearía un duplicado); se enlazan
++  // después de importar, igual que «Make transfer» de la interfaz.
++  const transferLinks: AviaTransferLink[] = [];
++  for (const trans of singleRes.transactions.all as Array<
++    BankSyncResponse['transactions']['all'][number] & {
++      aviaTransferAccountId?: string;
++      aviaTransferPeerId?: string;
++      payee?: string;
++    }
++  >) {
++    const target = trans.aviaTransferAccountId;
++    if (!target || target === actualAccountId) continue;
++    if (!transferPayees.has(target)) {
++      const row = await db.first<{ id: string }>(
++        'SELECT p.id FROM payees p JOIN accounts a ON a.id = p.transfer_acct WHERE p.transfer_acct = ? AND p.tombstone = 0 AND a.tombstone = 0 AND a.closed = 0',
++        [target],
++      );
++      transferPayees.set(target, row?.id ?? null);
++    }
++    const payeeId = transferPayees.get(target);
++    if (!payeeId) continue;
++    const peer = trans.aviaTransferPeerId
++      ? await db.first<{ id: string; transfer_id: string | null }>(
++          'SELECT id, transfer_id FROM v_transactions_internal WHERE account = ? AND imported_id = ? AND tombstone = 0',
++          [target, trans.aviaTransferPeerId],
++        )
++      : null;
++    if (peer) {
++      delete trans.payee;
++      if (!peer.transfer_id) {
++        transferLinks.push({
++          importedId: trans.transactionId,
++          peerId: peer.id,
++          targetAccount: target,
++          targetPayee: payeeId,
++        });
++      }
++    } else {
++      trans.payee = payeeId;
++    }
++  }
++
++  const retVal = {
++    transactions: singleRes.transactions.all,
++    accountBalance: singleRes.balances,
++    startingBalance: singleRes.startingBalance,
++    aviaTransferLinks: transferLinks,
++  };
++
++  logger.log('Response:', {
++    transactions: retVal.transactions.length,
++    startingBalance: retVal.startingBalance,
++  });
++  return retVal;
++}
++
+ async function downloadEnableBankingTransactions(
+   acctId: string,
+   since: string,
+@@ -1168,6 +1322,17 @@ async function processBankSyncDownload(
+         return total - amountToInteger(trans.transactionAmount.amount);
+       }, currentBalance);
+       balanceToUse = previousBalance;
++    } else if (acctRow.account_sync_source === 'avia') {
++      // startingBalance de AVIA es el saldo CONTABLE: solo se descuentan los
++      // movimientos contabilizados (los pendientes no forman parte de él).
++      const previousBalance = transactions.reduce(
++        (total, trans) =>
++          trans.booked
++            ? total - amountToInteger(trans.transactionAmount.amount)
++            : total,
++        currentBalance,
++      );
++      balanceToUse = Math.round(previousBalance);
+     } else if (acctRow.account_sync_source === 'akahu') {
+       const currentBalance = download.startingBalance;
+       const previousBalance = transactions.reduce(
+@@ -1271,6 +1436,8 @@ export async function syncAccount(
+     );
+   } else if (acctRow.account_sync_source === 'akahu') {
+     download = await downloadAkahuTransactions(acctId, syncStartDate);
++  } else if (acctRow.account_sync_source === 'avia') {
++    download = await downloadAviaTransactions(acctId, syncStartDate, id);
+   } else if (acctRow.account_sync_source === 'goCardless') {
+     download = await downloadGoCardlessTransactions(
+       userId,
+@@ -1293,6 +1460,19 @@ export async function syncAccount(
+     );
+   }
+ 
++  if (acctRow.account_sync_source === 'avia') {
++    const result = await processBankSyncDownload(
++      download,
++      id,
++      acctRow,
++      newAccount,
++      customStartingBalance,
++      customStartingDate,
++    );
++    await linkAviaTransfers(id, download?.aviaTransferLinks);
++    return result;
++  }
++
+   return processBankSyncDownload(
+     download,
+     id,
+diff --git a/packages/loot-core/src/server/db/types/index.ts b/packages/loot-core/src/server/db/types/index.ts
+index ee0000a4e..ace8663b4 100644
+--- a/packages/loot-core/src/server/db/types/index.ts
++++ b/packages/loot-core/src/server/db/types/index.ts
+@@ -21,7 +21,7 @@ export type DbAccount = {
+   type?: string | null;
+   subtype?: string | null;
+   bank?: string | null;
+-  account_sync_source?: 'simpleFin' | 'goCardless' | null;
++  account_sync_source?: 'simpleFin' | 'goCardless' | 'avia' | null;
+   last_reconciled?: string | null;
+   last_sync?: string | null;
+   bank_sync_status?:
+diff --git a/packages/loot-core/src/server/server-config.ts b/packages/loot-core/src/server/server-config.ts
+index b0c6e7e3d..efb0c251b 100644
+--- a/packages/loot-core/src/server/server-config.ts
++++ b/packages/loot-core/src/server/server-config.ts
+@@ -9,6 +9,7 @@ type ServerConfig = {
+   SIMPLEFIN_SERVER: string;
+   PLUGGYAI_SERVER: string;
+   AKAHU_SERVER: string;
++  AVIA_SERVER: string;
+   ENABLEBANKING_SERVER: string;
+ };
+ 
+@@ -48,6 +49,7 @@ export function getServer(url?: string): ServerConfig | null {
+         SIMPLEFIN_SERVER: joinURL(url, '/simplefin'),
+         PLUGGYAI_SERVER: joinURL(url, '/pluggyai'),
+         AKAHU_SERVER: joinURL(url, '/akahu'),
++        AVIA_SERVER: joinURL(url, '/avia'),
+         ENABLEBANKING_SERVER: joinURL(url, '/enablebanking'),
+       };
+     } catch (error) {
+diff --git a/packages/loot-core/src/types/models/avia.ts b/packages/loot-core/src/types/models/avia.ts
+new file mode 100644
+index 000000000..9ee5dbd34
+--- /dev/null
++++ b/packages/loot-core/src/types/models/avia.ts
+@@ -0,0 +1,79 @@
++// AVIA Bank Sync — proveedor bancario propio (Avia Rockets).
++export type SyncServerAviaAccount = {
++  balance: number;
++  account_id: string;
++  institution?: string;
++  orgDomain?: string | null;
++  orgId?: string;
++  name: string;
++};
++
++export type AviaInstitution = {
++  id: string;
++  name: string;
++  available: boolean;
++  reason: string | null;
++  doc: string | null;
++  testData: boolean;
++  authMethod?: 'none' | 'portal_login';
++};
++
++export type AviaLoginState =
++  | 'starting'
++  | 'filling'
++  | 'submitted'
++  | 'needs_user'
++  | 'succeeded'
++  | 'failed'
++  | 'cancelled'
++  | 'expired';
++
++export type AviaLogin = {
++  id: string;
++  bank: string;
++  bankName: string;
++  state: AviaLoginState;
++  message: string;
++  hint: string | null;
++  errorCode: string | null;
++  result: { connectionId: string } | null;
++  rut: string;
++  viewport: { width: number; height: number };
++  screenshot?: string;
++  screenshotAt?: number;
++  error_code?: string;
++  reason?: string;
++};
++
++export type AviaConnection = {
++  id: string;
++  label: string;
++  bank: string;
++  bank_id: string;
++  status: 'connected' | 'authorization_required' | 'error' | 'disconnected';
++  last_error: string | null;
++  last_success_at: string | null;
++  accounts: number;
++};
++
++export type AviaStatus = {
++  configured: boolean;
++  reachable: boolean;
++  state:
++    | 'not_configured'
++    | 'connected'
++    | 'syncing'
++    | 'synchronized'
++    | 'error'
++    | 'authorization_required';
++  connections?: AviaConnection[];
++  institutions?: AviaInstitution[];
++  lastSuccessfulSync?: string | null;
++  nextScheduledSync?: string | null;
++  isStale?: boolean;
++  linkedAccounts?: number;
++  importedTransactions?: number;
++  needsReview?: number;
++  reason?: string;
++  error?: string;
++};
+diff --git a/packages/loot-core/src/types/models/bank-sync.ts b/packages/loot-core/src/types/models/bank-sync.ts
+index c51823999..f636a1220 100644
+--- a/packages/loot-core/src/types/models/bank-sync.ts
++++ b/packages/loot-core/src/types/models/bank-sync.ts
+@@ -26,6 +26,7 @@ export const SYNC_PROVIDERS = [
+   'pluggyai',
+   'enableBanking',
+   'akahu',
++  'avia',
+ ] as const;
+ 
+ export type BankSyncProviders = (typeof SYNC_PROVIDERS)[number];
+diff --git a/packages/loot-core/src/types/models/index.ts b/packages/loot-core/src/types/models/index.ts
+index 9f8f90898..04e9ed2a8 100644
+--- a/packages/loot-core/src/types/models/index.ts
++++ b/packages/loot-core/src/types/models/index.ts
+@@ -1,6 +1,7 @@
+ export type * from './account';
+ export type * from './account-group';
+ export type * from './akahu';
++export type * from './avia';
+ export type * from './bank';
+ export type * from './bank-sync';
+ export type * from './category';
+diff --git a/packages/sync-server/src/app-avia/app-avia.test.ts b/packages/sync-server/src/app-avia/app-avia.test.ts
+new file mode 100644
+index 000000000..8a342108c
+--- /dev/null
++++ b/packages/sync-server/src/app-avia/app-avia.test.ts
+@@ -0,0 +1,186 @@
++import request from 'supertest';
++
++import { handlers } from './app-avia';
++
++const ADMIN = 'valid-token-admin';
++const USER = 'valid-token-user';
++
++function mockFetch(
++  impl: (url: string, init: RequestInit) => { status: number; body: unknown },
++) {
++  return vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
++    const { status, body } = impl(String(url), init ?? {});
++    return new Response(JSON.stringify(body), { status });
++  });
++}
++
++beforeEach(() => {
++  process.env.AVIA_SERVER_URL = 'http://avia-api:8000/';
++  process.env.AVIA_API_TOKEN = 'x'.repeat(40);
++});
++
++afterEach(() => {
++  delete process.env.AVIA_SERVER_URL;
++  delete process.env.AVIA_API_TOKEN;
++  vi.restoreAllMocks();
++});
++
++it('requires a valid Actual session', async () => {
++  const res = await request(handlers)
++    .post('/status')
++    .set('x-actual-token', 'invalid-token');
++  expect(res.status).toBe(401);
++});
++
++it('reports not configured when env vars are missing', async () => {
++  delete process.env.AVIA_SERVER_URL;
++  const res = await request(handlers)
++    .post('/status')
++    .set('x-actual-token', USER)
++    .expect(200);
++  expect(res.body.data).toMatchObject({ configured: false, reachable: false });
++});
++
++it('proxies status with the service token and never returns it', async () => {
++  const f = mockFetch(url => ({
++    status: 200,
++    body: url.endsWith('/v1/institutions')
++      ? { institutions: [{ id: 'sandbox', available: true }] }
++      : { configured: true, state: 'synchronized' },
++  }));
++  const res = await request(handlers)
++    .post('/status')
++    .set('x-actual-token', USER)
++    .expect(200);
++  expect(res.body.data).toMatchObject({
++    configured: true,
++    reachable: true,
++    institutions: [{ id: 'sandbox' }],
++  });
++  expect(JSON.stringify(res.body)).not.toContain('x'.repeat(40));
++  const [url, init] = f.mock.calls[0];
++  expect(String(url)).toBe('http://avia-api:8000/v1/status');
++  expect((init?.headers as Record<string, string>).Authorization).toBe(
++    `Bearer ${'x'.repeat(40)}`,
++  );
++});
++
++it('forwards transactions with the Actual account id', async () => {
++  const f = mockFetch(() => ({
++    status: 200,
++    body: { transactions: { all: [] } },
++  }));
++  await request(handlers)
++    .post('/transactions')
++    .set('x-actual-token', USER)
++    .send({
++      accountId: 'bank-acct',
++      startDate: '2026-11-01T00:00:00Z',
++      actualAccountId: 'act-1',
++    })
++    .expect(200);
++  expect(JSON.parse(String(f.mock.calls[0][1]?.body))).toEqual({
++    accountId: 'bank-acct',
++    startDate: '2026-11-01',
++    actualAccountId: 'act-1',
++  });
++});
++
++it('maps AVIA errors into data.error_code for loot-core', async () => {
++  mockFetch(() => ({
++    status: 200,
++    body: {
++      error_type: 'ITEM_ERROR',
++      error_code: 'ITEM_LOGIN_REQUIRED',
++      reason: 'reauth',
++    },
++  }));
++  // 200 + error body: AVIA devuelve el par de reautorización con 200
++  const ok = await request(handlers)
++    .post('/transactions')
++    .set('x-actual-token', USER)
++    .send({ accountId: 'a', startDate: '2026-11-01' })
++    .expect(200);
++  expect(ok.body.data.error_code).toBe('ITEM_LOGIN_REQUIRED');
++
++  vi.restoreAllMocks();
++  mockFetch(() => ({
++    status: 409,
++    body: { error_code: 'INSTITUTION_BLOCKED', reason: 'bloqueado' },
++  }));
++  const res = await request(handlers)
++    .post('/connections/create')
++    .set('x-actual-token', ADMIN)
++    .send({ institution: 'banco-chile' })
++    .expect(200);
++  expect(res.body.data).toMatchObject({
++    error_code: 'INSTITUTION_BLOCKED',
++    reason: 'bloqueado',
++  });
++});
++
++it('only admins can manage connections', async () => {
++  const f = mockFetch(() => ({ status: 201, body: { id: 'c1' } }));
++  for (const path of [
++    '/connections/create',
++    '/connections/delete',
++    '/connections/reauthorize',
++  ]) {
++    await request(handlers)
++      .post(path)
++      .set('x-actual-token', USER)
++      .send({ id: 'c1' })
++      .expect(403);
++  }
++  expect(f).not.toHaveBeenCalled();
++  await request(handlers)
++    .post('/connections/create')
++    .set('x-actual-token', ADMIN)
++    .send({ institution: 'sandbox' })
++    .expect(200);
++  expect(f).toHaveBeenCalledTimes(1);
++});
++
++it('reports unreachable service without crashing', async () => {
++  vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('ECONNREFUSED'));
++  const res = await request(handlers)
++    .post('/accounts')
++    .set('x-actual-token', USER)
++    .expect(200);
++  expect(res.body.data.error_code).toBe('AVIA_UNREACHABLE');
++});
++
++it('portal logins require admin and forward the payload', async () => {
++  const f = mockFetch(url => ({
++    status: url.includes('/input') ? 200 : 202,
++    body: { id: 'L1', state: 'starting' },
++  }));
++  for (const path of ['/logins/start', '/logins/status', '/logins/input']) {
++    await request(handlers)
++      .post(path)
++      .set('x-actual-token', USER)
++      .send({ id: 'L1' })
++      .expect(403);
++  }
++  expect(f).not.toHaveBeenCalled();
++  const res = await request(handlers)
++    .post('/logins/start')
++    .set('x-actual-token', ADMIN)
++    .send({ institution: 'banco-chile', rut: '11.111.111-1', password: 'x' })
++    .expect(200);
++  expect(res.body.data).toMatchObject({ id: 'L1', state: 'starting' });
++  expect(JSON.parse(String(f.mock.calls[0][1]?.body))).toMatchObject({
++    institution: 'banco-chile',
++    rut: '11.111.111-1',
++    password: 'x',
++    connectionId: null,
++  });
++  await request(handlers)
++    .post('/logins/input')
++    .set('x-actual-token', ADMIN)
++    .send({ id: 'L1', input: { type: 'key', key: 'Enter' } })
++    .expect(200);
++  expect(String(f.mock.calls[1][0])).toBe(
++    'http://avia-api:8000/v1/logins/L1/input',
++  );
++});
+diff --git a/packages/sync-server/src/app-avia/app-avia.ts b/packages/sync-server/src/app-avia/app-avia.ts
+new file mode 100644
+index 000000000..a7aac4430
+--- /dev/null
++++ b/packages/sync-server/src/app-avia/app-avia.ts
+@@ -0,0 +1,323 @@
++// AVIA Bank Sync — proveedor bancario propio de Avia Rockets.
++//
++// Proxy delgado hacia el servicio AVIA (contenedor independiente en la red
++// Docker interna). El token de servicio vive solo en este servidor
++// (variables de entorno); nunca llega al navegador.
++//
++//   AVIA_SERVER_URL  p. ej. http://avia-api:8000
++//   AVIA_API_TOKEN   mismo valor que en el servicio AVIA (>= 32 caracteres)
++//                    o AVIA_API_TOKEN_FILE (Docker secret)
++import { readFileSync } from 'node:fs';
++
++import express from 'express';
++import type { Request, Response } from 'express';
++
++import { isAdmin } from '#account-db';
++import { handleError } from '#app-gocardless/util/handle-error';
++import {
++  requestLoggerMiddleware,
++  validateSessionMiddleware,
++} from '#util/middlewares';
++
++const app = express();
++export { app as handlers };
++app.use(express.json());
++app.use(requestLoggerMiddleware);
++app.use(validateSessionMiddleware);
++
++// < 120 s del timeout de loot-core para /transactions (puede sincronizar si los datos están viejos)
++const TIMEOUT_MS = 110_000;
++
++function readToken(): string | undefined {
++  const file = process.env.AVIA_API_TOKEN_FILE;
++  if (file) {
++    try {
++      return readFileSync(file, 'utf8').trim();
++    } catch {
++      return undefined;
++    }
++  }
++  return process.env.AVIA_API_TOKEN;
++}
++
++function aviaConfig() {
++  const url = process.env.AVIA_SERVER_URL?.replace(/\/+$/, '');
++  const token = readToken();
++  return url && token ? { url, token } : null;
++}
++
++type AviaResult = {
++  ok: boolean;
++  status: number;
++  body: Record<string, unknown> | null;
++};
++
++async function avia(
++  method: 'GET' | 'POST' | 'DELETE',
++  path: string,
++  body?: unknown,
++): Promise<AviaResult> {
++  const cfg = aviaConfig();
++  if (!cfg) {
++    return {
++      ok: false,
++      status: 503,
++      body: {
++        error_type: 'AVIA',
++        error_code: 'AVIA_NOT_CONFIGURED',
++        reason:
++          'El servidor de Actual no tiene AVIA_SERVER_URL / AVIA_API_TOKEN configurados.',
++      },
++    };
++  }
++  try {
++    const res = await fetch(cfg.url + path, {
++      method,
++      headers: {
++        Authorization: `Bearer ${cfg.token}`,
++        'Content-Type': 'application/json',
++      },
++      body: body === undefined ? undefined : JSON.stringify(body),
++      signal: AbortSignal.timeout(TIMEOUT_MS),
++    });
++    const text = await res.text();
++    let parsed: Record<string, unknown> | null = null;
++    try {
++      parsed = text ? JSON.parse(text) : null;
++    } catch {
++      parsed = { reason: text.slice(0, 200) };
++    }
++    if (parsed && typeof parsed.detail === 'object' && parsed.detail) {
++      parsed = parsed.detail as Record<string, unknown>;
++    }
++    return { ok: res.ok, status: res.status, body: parsed };
++  } catch (error) {
++    return {
++      ok: false,
++      status: 502,
++      body: {
++        error_type: 'AVIA',
++        error_code: 'AVIA_UNREACHABLE',
++        reason:
++          error instanceof Error
++            ? `No se pudo contactar a AVIA Bank Sync: ${error.message}`
++            : 'No se pudo contactar a AVIA Bank Sync',
++      },
++    };
++  }
++}
++
++// Respuesta en el formato que espera loot-core: { status: 'ok', data }.
++// Los errores viajan dentro de data como { error_type, error_code, reason }.
++function reply(res: Response, result: AviaResult, data?: unknown) {
++  if (result.ok) {
++    res.send({ status: 'ok', data: data ?? result.body ?? {} });
++    return;
++  }
++  const b = result.body ?? {};
++  res.send({
++    status: 'ok',
++    data: {
++      error_type: b.error_type ?? 'AVIA',
++      error_code: b.error_code ?? `HTTP_${result.status}`,
++      reason: b.reason ?? 'Error de AVIA Bank Sync',
++      status: 'rejected',
++    },
++  });
++}
++
++function requireAdmin(res: Response): boolean {
++  if (!isAdmin(res.locals.user_id)) {
++    res.status(403).send({
++      status: 'error',
++      reason: 'forbidden',
++      details: 'permission-not-found',
++    });
++    return false;
++  }
++  return true;
++}
++
++app.post(
++  '/status',
++  handleError(async (_req: Request, res: Response) => {
++    if (!aviaConfig()) {
++      res.send({
++        status: 'ok',
++        data: { configured: false, reachable: false, state: 'not_configured' },
++      });
++      return;
++    }
++    const [status, institutions] = await Promise.all([
++      avia('GET', '/v1/status'),
++      avia('GET', '/v1/institutions'),
++    ]);
++    if (!status.ok) {
++      res.send({
++        status: 'ok',
++        data: {
++          configured: false,
++          reachable: false,
++          state: 'error',
++          reason: status.body?.reason,
++        },
++      });
++      return;
++    }
++    res.send({
++      status: 'ok',
++      data: {
++        ...status.body,
++        reachable: true,
++        institutions: institutions.body?.institutions ?? [],
++      },
++    });
++  }),
++);
++
++app.post(
++  '/accounts',
++  handleError(async (_req: Request, res: Response) => {
++    reply(res, await avia('GET', '/v1/accounts'));
++  }),
++);
++
++app.post(
++  '/transactions',
++  handleError(async (req: Request, res: Response) => {
++    const { accountId, startDate, actualAccountId } = req.body || {};
++    if (!accountId || !startDate) {
++      res.send({
++        status: 'ok',
++        data: { error: 'accountId and startDate are required' },
++      });
++      return;
++    }
++    reply(
++      res,
++      await avia('POST', '/v1/transactions', {
++        accountId,
++        startDate: String(startDate).slice(0, 10),
++        actualAccountId: actualAccountId ?? null,
++      }),
++    );
++  }),
++);
++
++app.post(
++  '/sync',
++  handleError(async (req: Request, res: Response) => {
++    const { trigger = 'manual', onlyIfStale = false } = req.body || {};
++    reply(
++      res,
++      await avia('POST', '/v1/sync', {
++        trigger: trigger === 'actual_open' ? 'actual_open' : 'manual',
++        onlyIfStale: Boolean(onlyIfStale),
++      }),
++    );
++  }),
++);
++
++app.post(
++  '/connections/create',
++  handleError(async (req: Request, res: Response) => {
++    if (!requireAdmin(res)) return;
++    const { institution, label, params } = req.body || {};
++    reply(
++      res,
++      await avia('POST', '/v1/connections', {
++        institution,
++        label,
++        params: params ?? {},
++      }),
++    );
++  }),
++);
++
++app.post(
++  '/connections/delete',
++  handleError(async (req: Request, res: Response) => {
++    if (!requireAdmin(res)) return;
++    const { id } = req.body || {};
++    reply(
++      res,
++      await avia('DELETE', `/v1/connections/${encodeURIComponent(id)}`),
++      { deleted: true },
++    );
++  }),
++);
++
++app.post(
++  '/connections/reauthorize',
++  handleError(async (req: Request, res: Response) => {
++    if (!requireAdmin(res)) return;
++    const { id, params } = req.body || {};
++    reply(
++      res,
++      await avia(
++        'POST',
++        `/v1/connections/${encodeURIComponent(id)}/reauthorize`,
++        { params: params ?? {} },
++      ),
++    );
++  }),
++);
++
++// Login asistido a portales bancarios (RUT + clave). La clave viaja solo
++// navegador -> sync-server -> AVIA por la red interna y AVIA la guarda cifrada.
++app.post(
++  '/logins/start',
++  handleError(async (req: Request, res: Response) => {
++    if (!requireAdmin(res)) return;
++    const { institution, rut, password, label, connectionId } = req.body || {};
++    reply(
++      res,
++      await avia('POST', '/v1/logins', {
++        institution,
++        rut: rut ?? '',
++        password: password ?? '',
++        label: label ?? null,
++        connectionId: connectionId ?? null,
++      }),
++    );
++  }),
++);
++
++app.post(
++  '/logins/status',
++  handleError(async (req: Request, res: Response) => {
++    if (!requireAdmin(res)) return;
++    const { id } = req.body || {};
++    reply(res, await avia('GET', `/v1/logins/${encodeURIComponent(id)}`));
++  }),
++);
++
++app.post(
++  '/logins/input',
++  handleError(async (req: Request, res: Response) => {
++    if (!requireAdmin(res)) return;
++    const { id, input } = req.body || {};
++    reply(
++      res,
++      await avia(
++        'POST',
++        `/v1/logins/${encodeURIComponent(id)}/input`,
++        input ?? {},
++      ),
++    );
++  }),
++);
++
++app.post(
++  '/unlink',
++  handleError(async (req: Request, res: Response) => {
++    const { actualAccountId } = req.body || {};
++    reply(
++      res,
++      await avia(
++        'POST',
++        `/v1/actual-accounts/${encodeURIComponent(actualAccountId)}/unlink`,
++      ),
++    );
++  }),
++);
+diff --git a/packages/sync-server/src/app.ts b/packages/sync-server/src/app.ts
+index 88f1c1de2..4b0c2bfd0 100644
+--- a/packages/sync-server/src/app.ts
++++ b/packages/sync-server/src/app.ts
+@@ -11,6 +11,7 @@ import { bootstrap } from './account-db';
+ import * as accountApp from './app-account';
+ import * as adminApp from './app-admin';
+ import * as akahuApp from './app-akahu/app-akahu.js';
++import * as aviaApp from './app-avia/app-avia';
+ import * as corsApp from './app-cors-proxy';
+ import * as enableBankingApp from './app-enablebanking/app-enablebanking';
+ import * as goCardlessApp from './app-gocardless/app-gocardless';
+@@ -66,6 +67,7 @@ app.use('/gocardless', goCardlessApp.handlers);
+ app.use('/simplefin', simpleFinApp.handlers);
+ app.use('/pluggyai', pluggai.handlers);
+ app.use('/akahu', akahuApp.handlers);
++app.use('/avia', aviaApp.handlers);
+ app.use('/enablebanking', enableBankingApp.handlers);
+ app.use('/secret', secretApp.handlers);
+ 

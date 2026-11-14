@@ -1,0 +1,4 @@
+instalacion-avia-*.log
+rollback-avia.sh
+.avia-swap
+build/

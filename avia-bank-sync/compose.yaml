@@ -1,0 +1,128 @@
+# AVIA Bank Sync — proyecto Docker independiente para el Synology NAS.
+#
+# Se une a la red del proyecto existente de Actual (actual-budget_default) para que:
+#   - el sync-server de Actual alcance a AVIA en http://avia-api:8000
+#   - el runner alcance a Actual en http://actual-budget:5006
+# PostgreSQL vive SOLO en la red interna "avia_internal" (sin salida ni puertos publicados).
+#
+# Uso:   cd /volume1/docker/avia-bank-sync && docker compose up -d
+name: avia-bank-sync
+
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: "10m", max-file: "5" }
+  environment: &tz
+    TZ: America/Santiago
+
+services:
+  avia-db:
+    <<: *common
+    image: postgres:16-alpine
+    environment:
+      TZ: America/Santiago
+      POSTGRES_DB: avia
+      POSTGRES_USER: avia
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes:
+      - ${AVIA_DATA_DIR:-/volume1/docker/avia-bank-sync}/postgres:/var/lib/postgresql/data
+    networks: [avia_internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U avia -d avia"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    shm_size: 128mb
+
+  avia-api:
+    <<: *common
+    build: .
+    image: aviarockets/avia-bank-sync:${AVIA_VERSION:-1.0.0}
+    depends_on:
+      avia-db: { condition: service_healthy }
+    environment:
+      TZ: America/Santiago
+      AVIA_DATABASE_URL_FILE: /run/secrets/database_url
+      AVIA_API_TOKEN_FILE: /run/secrets/api_token
+      AVIA_ENCRYPTION_KEYS_FILE: /run/secrets/encryption_keys
+      AVIA_ENABLED_CONNECTORS: ${AVIA_ENABLED_CONNECTORS:-sandbox,banco_chile,itau,ripley}
+      AVIA_DAILY_SYNC_HOUR: ${AVIA_DAILY_SYNC_HOUR:-6}
+      AVIA_DAILY_SYNC_MINUTE: ${AVIA_DAILY_SYNC_MINUTE:-15}
+      AVIA_FRESHNESS_HOURS: ${AVIA_FRESHNESS_HOURS:-12}
+      AVIA_INITIAL_HISTORY_DAYS: ${AVIA_INITIAL_HISTORY_DAYS:-90}
+      AVIA_ACTUAL_RUNNER_URL: http://avia-runner:8090
+      AVIA_NOTIFY_WEBHOOK_URL: ${AVIA_NOTIFY_WEBHOOK_URL:-}
+    secrets: [database_url, api_token, encryption_keys]
+    networks:
+      avia_internal: {}
+      actual:
+        aliases: [avia-api]
+    # Panel técnico solo por loopback del NAS (acceder vía túnel SSH). Nunca a Internet.
+    ports:
+      - "127.0.0.1:${AVIA_PANEL_PORT:-8070}:8000"
+    read_only: true
+    tmpfs: ["/tmp:size=512m"]
+    shm_size: 512mb   # Chromium
+    security_opt: ["no-new-privileges:true"]
+
+  avia-runner:
+    <<: *common
+    image: aviarockets/avia-actual-runner:${ACTUAL_AVIA_VERSION:-26.11.0-avia.1}
+    depends_on:
+      avia-api: { condition: service_healthy }
+    environment:
+      TZ: America/Santiago
+      ACTUAL_SERVER_URL: http://actual-budget:5006
+      ACTUAL_BUDGET_SYNC_ID: ${ACTUAL_BUDGET_SYNC_ID:?definir el Sync ID del presupuesto (Ajustes > Avanzado)}
+      ACTUAL_PASSWORD_FILE: /run/secrets/actual_password
+      ACTUAL_BUDGET_E2E_PASSWORD_FILE: /run/secrets/actual_e2e_password
+      AVIA_SERVER_URL: http://avia-api:8000
+      AVIA_API_TOKEN_FILE: /run/secrets/api_token
+    secrets: [actual_password, actual_e2e_password, api_token]
+    volumes:
+      - ${AVIA_DATA_DIR:-/volume1/docker/avia-bank-sync}/runner:/data
+    networks: [actual]
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8090/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  avia-backup:
+    <<: *common
+    image: postgres:16-alpine
+    depends_on:
+      avia-db: { condition: service_healthy }
+    environment:
+      TZ: America/Santiago
+      PGHOST: avia-db
+      PGUSER: avia
+      PGDATABASE: avia
+      PGPASSFILE: /tmp/.pgpass
+      BACKUP_RETENTION_DAYS: ${AVIA_BACKUP_RETENTION_DAYS:-30}
+      BACKUP_HOUR: ${AVIA_BACKUP_HOUR:-3}
+    secrets: [db_password, backup_key]
+    volumes:
+      - ./scripts/backup.sh:/backup.sh:ro
+      - ${AVIA_BACKUP_DIR:-/volume1/docker/avia-bank-sync/backups}:/backups
+    entrypoint: ["/bin/sh", "/backup.sh", "loop"]
+    networks: [avia_internal]
+
+networks:
+  avia_internal:
+    internal: true
+  actual:
+    external: true
+    name: ${ACTUAL_NETWORK:-actual-budget_default}
+
+secrets:
+  db_password: { file: ./secrets/db_password }
+  database_url: { file: ./secrets/database_url }
+  api_token: { file: ./secrets/api_token }
+  encryption_keys: { file: ./secrets/encryption_keys }
+  backup_key: { file: ./secrets/backup_key }
+  actual_password: { file: ./secrets/actual_password }
+  actual_e2e_password: { file: ./secrets/actual_e2e_password }

@@ -1,0 +1,13 @@
+{
+  "name": "avia-actual-runner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Importa en Actual Budget los movimientos sincronizados por AVIA Bank Sync usando el bank sync interno de Actual",
+  "main": "index.mjs",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node index.mjs" },
+  "dependencies": {
+    "@actual-app/api": "file:./vendor/actual-app-api.tgz"
+  }
+}

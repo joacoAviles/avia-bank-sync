@@ -1,0 +1,27 @@
+{
+  "upstream": {
+    "repository": "https://github.com/actualbudget/actual.git",
+    "tag": "v26.11.0",
+    "commit": "1766241e3f4b3c578e424c4fa15f1eb83c0da17d"
+  },
+  "avia": {
+    "version": "26.11.0-avia.1",
+    "patches": ["patches/0001-avia-bank-sync-provider.patch"]
+  },
+  "images": {
+    "actual": "aviarockets/actual-server:26.11.0-avia.1",
+    "runner": "aviarockets/avia-actual-runner:26.11.0-avia.1"
+  },
+  "verified": {
+    "date": "2026-11-14",
+    "node": "22.23.4",
+    "checks": [
+      "yarn typecheck (monorepo completo)",
+      "oxlint + oxfmt sobre archivos modificados",
+      "loot-core src/server/accounts: 55 pruebas",
+      "sync-server: 765 pruebas + 7 de app-avia",
+      "desktop-client src/components/banksync: 36 pruebas",
+      "tests/e2e.mjs contra stack real (PostgreSQL + AVIA + sync-server + @actual-app/api)"
+    ]
+  }
+}
