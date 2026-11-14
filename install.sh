@@ -105,11 +105,13 @@ if ! command -v jq >/dev/null; then
   chmod +x "$TOOLS/bin/jq"
 fi
 if ! command -v git >/dev/null; then
-  say "   git no instalado: uso contenedor alpine/git"
-  cat > "$TOOLS/bin/git" <<'EOF'
+  say "   git no instalado: uso contenedor node (el mismo que compila Actual)"
+  cat > "$TOOLS/bin/git" <<'EOF2'
 #!/bin/sh
-exec docker run --rm -v "$PWD":"$PWD" -w "$PWD" -e HOME=/tmp alpine/git "$@"
-EOF
+exec docker run --rm -v "$PWD":"$PWD" -w "$PWD" -e HOME=/tmp \
+  -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
+  node:24.22.1-bookworm git "$@"
+EOF2
   chmod +x "$TOOLS/bin/git"
 fi
 
@@ -126,6 +128,7 @@ if [ "$MEM_MB" -lt 7500 ]; then
   swapon "$SWAPF" || warn "swapon falló; continúo sin swap"
 fi
 
+[ -d "$INTEG_DIR/build/actual/packages" ] || rm -rf "$INTEG_DIR/build"   # clon a medias de un intento anterior
 export PLATFORM
 ( cd "$INTEG_DIR" && ./scripts/build-images.sh )
 ( cd "$AVIA_DIR" && AVIA_VERSION=1.0.0 $DC build avia-api )
