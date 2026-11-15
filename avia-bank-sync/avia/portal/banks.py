@@ -72,7 +72,7 @@ PORTALS: dict[str, PortalConfig] = {
         login_url="https://web.bancoripley.cl/login",
         rut_selector='input[name="rut"]',
         password_selector='input[name="password"]',
-        submit_selector='button[type="submit"]:has-text("Ingresar")',
+        submit_selector='.login-form__actions button.primary, button:has-text("Ingresar")',
         rut_style="dotted",
         success_url=re.compile(r"^https://web\.bancoripley\.cl/(?!login|onboarding)[a-z]", re.I),
         login_url_markers=("web.bancoripley.cl/login", "web.bancoripley.cl/onboarding"),
