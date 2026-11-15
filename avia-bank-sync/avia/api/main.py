@@ -196,7 +196,20 @@ def login_input(sid: str, body: LoginInputIn):
 
 @app.get("/v1/accounts", dependencies=auth)
 def accounts():
-    return {"accounts": state.service.accounts()}
+    accs = state.service.accounts()
+    if not accs and state.service.status()["configured"]:
+        # Primera vez: aún no se ha sincronizado nunca. Extraer ahora (bloquea hasta terminar)
+        # para que «Enlazar cuenta» muestre las cuentas sin pasos manuales.
+        import time
+        try:
+            state.service.engine.run("manual")
+        except SyncInProgress:
+            for _ in range(120):
+                time.sleep(1)
+                if not db.sync_lock_held():
+                    break
+        accs = state.service.accounts()
+    return {"accounts": accs}
 
 
 @app.post("/v1/accounts/{bank_account_id}/link", dependencies=auth, status_code=204)
