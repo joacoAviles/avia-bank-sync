@@ -88,25 +88,33 @@ class BancoChilePortal(PortalConnector):
             rut, nombre = (prods or {}).get("rut"), (prods or {}).get("nombre")
             for p in (prods or {}).get("productos", []):
                 num = str(p.get("numero") or "").strip()
-                if not num:
+                if not num or not (p.get("tipo") or "").lower().startswith("cuenta"):
+                    continue  # líneas de crédito y seguros: la línea viene dentro de la cartola
+                vista = (p.get("claseCuenta") or "").upper().startswith("VTA")
+                acct = BankAccount(num, p.get("label") or "Cuenta", "vista" if vista else "checking",
+                                   p.get("codigoMoneda") or "CLP", p.get("mascara") or num[-4:])
+                data[num] = {"acct": acct, "p": p, "txs": [], "bal": None}
+                try:
+                    self._checking(c, data[num], rut, nombre, since)
+                except BankError as exc:
+                    data[num]["error"] = str(exc)
+            try:
+                self._infotarj = c.call("POST", BASE + "tarjetas/widget/informacion-tarjetas", {}) or []
+            except BankError:
+                self._infotarj = []
+            for it in self._infotarj:
+                cid = str(it.get("idProducto") or "").strip()
+                if not cid:
                     continue
-                masked = p.get("mascara") or (num[-4:] if num else None)
-                if (p.get("tipo") or "").lower() == "cuenta":
-                    acct = BankAccount(num, p.get("label") or "Cuenta corriente", "checking",
-                                       p.get("codigoMoneda") or "CLP", masked)
-                    data[num] = {"acct": acct, "p": p, "txs": [], "bal": None}
-                    try:
-                        self._checking(c, data[num], rut, nombre, since)
-                    except BankError as exc:
-                        data[num]["error"] = str(exc)
-                else:
-                    acct = BankAccount(num, p.get("label") or p.get("descripcionLogo") or "Tarjeta de crédito",
-                                       "credit_card", p.get("codigoMoneda") or "CLP", masked)
-                    data[num] = {"acct": acct, "p": p, "txs": [], "bal": None}
-                    try:
-                        self._card(c, data[num], nombre, since)
-                    except BankError as exc:
-                        data[num]["error"] = str(exc)
+                last4 = re.sub(r"\D", "", str(it.get("numero") or ""))[-4:]
+                acct = BankAccount(cid, f"{it.get('marca') or 'Tarjeta'} {it.get('tipo') or ''}".strip(),
+                                   "credit_card", "CLP", f"****{last4}" if last4 else None)
+                data[cid] = {"acct": acct, "p": it, "txs": [], "bal": None}
+                try:
+                    self._card(c, data[cid], nombre, since)
+                except BankError as exc:
+                    data[cid]["error"] = str(exc)
+            self.diagnostics = c.log
         self._data = data
         return data
 
@@ -164,24 +172,21 @@ class BancoChilePortal(PortalConnector):
             if rec["txs"] and min(t.value_date for t in rec["txs"]) < since:
                 break
 
-    def _card_bodies(self, c: PortalClient, p, nombre) -> list[dict[str, Any]]:
-        titular = "T" if (p.get("tipoCliente") or "Titular") == "Titular" else "A"
-        nom = p.get("tarjetaHabiente") or nombre
-        bodies = []
-        if not hasattr(self, "_infotarj"):
-            try:
-                self._infotarj = c.call("POST", BASE + "tarjetas/widget/informacion-tarjetas", {}) or []
-            except BankError:
-                self._infotarj = []
-        last4 = re.sub(r"\D", "", str(p.get("mascara") or p.get("numero") or ""))[-4:]
-        for it in self._infotarj:
-            if re.sub(r"\D", "", str(it.get("numero") or ""))[-4:] == last4:
-                bodies.append({"idTarjeta": it.get("idProducto"), "codigoProducto": p.get("codigo"),
-                               "tipoTarjeta": f"{it.get('marca')} {it.get('tipo')}  ", "mascara": p.get("mascara"),
-                               "nombreTitular": nom, "tipoCliente": titular})
-        bodies.append({"idTarjeta": p.get("numero"), "codigoProducto": p.get("codigo"),
-                       "tipoTarjeta": p.get("tipoTarjeta") or p.get("label") or p.get("descripcionLogo"),
-                       "mascara": p.get("mascara"), "nombreTitular": nom, "tipoCliente": titular})
+    def _card_bodies(self, it, nombre) -> list[dict[str, Any]]:
+        marca, tipo = str(it.get("marca") or ""), str(it.get("tipo") or "")
+        last4 = re.sub(r"\D", "", str(it.get("numero") or ""))[-4:]
+        codes = [f"TN{marca[:1].upper()}", "TNM"] if marca else ["TNM"]
+        names = [(nombre or "").strip(), (nombre or "").strip().ljust(30)]
+        bodies, seen = [], set()
+        for code in codes:
+            for nom in names:
+                key = (code, nom)
+                if key in seen:
+                    continue
+                seen.add(key)
+                bodies.append({"idTarjeta": it.get("idProducto"), "codigoProducto": code,
+                               "tipoTarjeta": f"{marca} {tipo}  ", "mascara": f"****{last4}",
+                               "nombreTitular": nom, "tipoCliente": "T" if it.get("titular", True) else "A"})
         return bodies
 
     @staticmethod
@@ -198,7 +203,7 @@ class BancoChilePortal(PortalConnector):
 
     def _card(self, c: PortalClient, rec, nombre, since: date) -> None:
         cur = rec["acct"].currency
-        bodies = self._card_bodies(c, rec["p"], nombre)
+        bodies = self._card_bodies(rec["p"], nombre)
         rec["debug"] = {"bodies": len(bodies), "body_keys": {k: (str(v) and re.sub(r"\d", "9", str(v))[:30])
                                                             for k, v in bodies[0].items() if k != "nombreTitular"}}
         s, body = self._try(c, BASE + "tarjeta-credito-digital/saldo/obtener-saldo", bodies)
