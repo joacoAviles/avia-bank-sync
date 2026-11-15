@@ -60,6 +60,12 @@ def main(bank: str) -> None:
                                  for kk, v in pp.items() if kk not in ("numero", "id")})
         for it in getattr(c, "_infotarj", []) or []:
             print("   info-tarjeta:", {kk: (re.sub(r"\d", "9", str(v))[:30] if kk != "cupos" else "…") for kk, v in it.items() if kk != "numero"})
+        if getattr(c, "debug", None):
+            print("debug:", c.debug)
+        if bank == "ripley":
+            from collections import Counter
+            for r in rec.values():
+                print("   signos/montos:", Counter(("-" if t.amount < 0 else "+") for t in r["txs"]))
         print("llamadas:", [(m, p, s) for m, p, s in getattr(c, "diagnostics", [])])
     except Exception as exc:  # noqa: BLE001
         print(f"FALLÓ: {type(exc).__name__}: {str(exc)[:300]}")

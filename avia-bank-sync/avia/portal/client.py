@@ -32,12 +32,13 @@ async ({method, url, body, headers}) => {
 
 
 class PortalClient:
-    def __init__(self, portal: PortalConfig, credentials: dict[str, Any], api_marker: str):
+    def __init__(self, portal: PortalConfig, credentials: dict[str, Any], api_marker: str, init_script: str | None = None):
         self.portal = portal
         self.creds = credentials or {}
         self.state = self.creds.get("storage_state")
         self.new_state: dict[str, Any] | None = None
         self.api_marker = api_marker
+        self.init_script = init_script
         self.headers: dict[str, str] = {}
         self.log: list[tuple[str, str, int]] = []  # (método, ruta, estado) para diagnóstico
         self._pw = self._browser = self._ctx = self.page = None
@@ -54,6 +55,8 @@ class PortalClient:
             args=["--no-first-run", "--no-default-browser-check", "--disable-dev-shm-usage"])
         self._ctx = self._browser.new_context(storage_state=self.state or None, viewport=VIEWPORT, locale="es-CL",
                                               timezone_id="America/Santiago")
+        if self.init_script:
+            self._ctx.add_init_script(self.init_script)
         self.page = self._ctx.new_page()
         self.page.on("request", self._on_request)
         try:
