@@ -207,13 +207,17 @@ class LoginSession:
             return
         self.current_url = page.url
         for sel in p.pre_clicks:
-            page.locator(sel).first.click(timeout=15000)
+            try:
+                page.locator(sel).first.click(timeout=15000)
+            except Exception:  # noqa: BLE001
+                log.info("pre_click omitido", extra={"login_id": self.id, "selector": sel})
 
         self._set("filling", "Ingresando RUT y clave…")
         try:
             page.locator(p.rut_selector).first.wait_for(state="visible", timeout=30000)
         except Exception:  # noqa: BLE001
-            self._set("needs_user", f"No encontré el formulario de {p.name}. Puede que el portal haya cambiado; "
+            self._set("needs_user", f"No encontré el formulario de {p.name} (¿hay una ventana emergente, como "
+                                    f"«permitir ubicación»? Haz clic sobre ella en la pantalla).  Puede que el portal haya cambiado; "
                                     "puedes ingresar manualmente en la pantalla.", hint=None)
             self._shoot(page)
             return self._wait_user(page, ctx, deadline)

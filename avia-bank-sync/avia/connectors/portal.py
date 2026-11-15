@@ -52,6 +52,11 @@ class ItauPortal(PortalConnector):
     bank_id = portal_id = "itau"
     display_name = "Itaú Chile"
 
+    @classmethod
+    def availability(cls):
+        return {"available": False, "doc": None,
+                "reason": "Itaú no disponible: su portal bloquea los ingresos automatizados (Error 15)."}
+
 
 class RipleyPortal(PortalConnector):
     bank_id = portal_id = "ripley"
