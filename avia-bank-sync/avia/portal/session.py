@@ -16,6 +16,7 @@ hilo que la crea); el resto de la app se comunica solo por la cola de comandos.
 
 from __future__ import annotations
 
+import re
 import base64
 import logging
 import os
@@ -152,7 +153,7 @@ class LoginSession:
                 for el in page.locator(sel).all()[:5]:
                     if el.is_visible():
                         txt = (el.inner_text(timeout=500) or "").strip()
-                        if 4 < len(txt) < 300:
+                        if 4 < len(txt) < 300 and not re.search(r"olvid|recuper|clave digital", txt, re.I):
                             return " ".join(txt.split())
             except Exception:  # noqa: BLE001
                 continue
@@ -269,7 +270,7 @@ class LoginSession:
             err = self._visible_error(page) if p.is_login(url) else None
             elapsed = time.time() - submitted_at
             if self.state == "submitted":
-                if err and elapsed > 2:
+                if err and elapsed > 6:
                     hint = self._hint(page)
                     if hint and "CAPTCHA" in hint:
                         self._set("needs_user", err, hint=hint)
