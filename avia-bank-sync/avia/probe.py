@@ -52,9 +52,14 @@ def main(bank: str) -> None:
                       f"{' cuota ' + str(t.installment_number) + '/' + str(t.installment_total) if t.installment_total else ''}")
         rec = getattr(c, "_data", {}) or {}
         for k, r in rec.items():
+            print(f" * {r['acct'].masked_number} debug:", r.get("debug"))
             if r.get("error"):
-                print(f" ! {r['acct'].masked_number}: {r['error']}")
-            print("   claves del producto:", sorted((r.get("p") or {}).keys()))
+                print(f"   ! {r['error']}")
+            pp = r.get("p") or {}
+            print("   producto:", {kk: (re.sub(r"\d", "9", str(v))[:40] if kk not in ("tarjetaHabiente",) else f"str({len(str(v))})")
+                                 for kk, v in pp.items() if kk not in ("numero", "id")})
+        for it in getattr(c, "_infotarj", []) or []:
+            print("   info-tarjeta:", {kk: (re.sub(r"\d", "9", str(v))[:30] if kk != "cupos" else "…") for kk, v in it.items() if kk != "numero"})
         print("llamadas:", [(m, p, s) for m, p, s in getattr(c, "diagnostics", [])])
     except Exception as exc:  # noqa: BLE001
         print(f"FALLÓ: {type(exc).__name__}: {str(exc)[:300]}")

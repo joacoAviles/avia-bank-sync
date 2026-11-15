@@ -137,7 +137,9 @@ class PortalClient:
         if res["status"] in (401, 403):
             raise AuthorizationRequired(f"{self.portal.name} rechazó la sesión (HTTP {res['status']}).")
         if res["status"] >= 400:
-            raise BankError(f"{self.portal.name}: HTTP {res['status']} en {path[-1]}")
+            import re as _re
+            snip = _re.sub(r"\d", "9", (res["text"] or "")[:220]).replace("\n", " ")
+            raise BankError(f"{self.portal.name}: HTTP {res['status']} en {path[-1]} · {snip}")
         try:
             return json.loads(res["text"]) if res["text"] else None
         except ValueError as exc:

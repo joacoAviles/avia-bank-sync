@@ -120,6 +120,7 @@ class BancoChilePortal(PortalConnector):
         p, cur = rec["p"], rec["acct"].currency
         body_acct = self._account_body(p, rut, nombre)
         desde, seen = 0, set()
+        dbg = rec.setdefault("debug", {"pages": 0, "raw": 0, "no_date": 0, "old": 0})
         for _ in range(30):
             r = c.call("POST", BASE + "bff-pper-prd-cta-movimientos/movimientos/getCartola",
                        {"cuentaSeleccionada": body_acct,
@@ -129,9 +130,20 @@ class BancoChilePortal(PortalConnector):
                                      clp(r.get("saldoDisponible")) if r.get("saldoDisponible") is not None else None,
                                      date.today())
             movs = (r or {}).get("movimientos") or []
+            dbg["pages"] += 1
+            dbg["raw"] += len(movs)
+            dbg.setdefault("keys", sorted((r or {}).keys()))
+            if movs and "sample" not in dbg:
+                import re as _re
+                dbg["sample"] = {k: _re.sub(r"\d", "9", str(movs[0].get(k)))[:24]
+                                 for k in ("fechaContable", "fecha", "fechaContableMovimiento", "tipo", "monto")}
             for i, m in enumerate(movs):
                 d = to_date(m.get("fechaContable")) or to_date(m.get("fecha")) or to_date(m.get("fechaContableMovimiento"))
-                if not d or d < since:
+                if not d:
+                    dbg["no_date"] += 1
+                    continue
+                if d < since:
+                    dbg["old"] += 1
                     continue
                 amt = abs(clp(m.get("monto")))
                 if (m.get("tipo") or "").lower() == "cargo":
@@ -152,15 +164,45 @@ class BancoChilePortal(PortalConnector):
             if rec["txs"] and min(t.value_date for t in rec["txs"]) < since:
                 break
 
-    def _card_body(self, p, nombre) -> dict[str, Any]:
-        return {"idTarjeta": p.get("numero"), "codigoProducto": p.get("codigo"),
-                "tipoTarjeta": p.get("tipoTarjeta") or p.get("label") or p.get("descripcionLogo"),
-                "mascara": p.get("mascara"), "nombreTitular": p.get("tarjetaHabiente") or nombre,
-                "tipoCliente": "T" if (p.get("tipoCliente") or "Titular") == "Titular" else "A"}
+    def _card_bodies(self, c: PortalClient, p, nombre) -> list[dict[str, Any]]:
+        titular = "T" if (p.get("tipoCliente") or "Titular") == "Titular" else "A"
+        nom = p.get("tarjetaHabiente") or nombre
+        bodies = []
+        if not hasattr(self, "_infotarj"):
+            try:
+                self._infotarj = c.call("POST", BASE + "tarjetas/widget/informacion-tarjetas", {}) or []
+            except BankError:
+                self._infotarj = []
+        last4 = re.sub(r"\D", "", str(p.get("mascara") or p.get("numero") or ""))[-4:]
+        for it in self._infotarj:
+            if re.sub(r"\D", "", str(it.get("numero") or ""))[-4:] == last4:
+                bodies.append({"idTarjeta": it.get("idProducto"), "codigoProducto": p.get("codigo"),
+                               "tipoTarjeta": f"{it.get('marca')} {it.get('tipo')}  ", "mascara": p.get("mascara"),
+                               "nombreTitular": nom, "tipoCliente": titular})
+        bodies.append({"idTarjeta": p.get("numero"), "codigoProducto": p.get("codigo"),
+                       "tipoTarjeta": p.get("tipoTarjeta") or p.get("label") or p.get("descripcionLogo"),
+                       "mascara": p.get("mascara"), "nombreTitular": nom, "tipoCliente": titular})
+        return bodies
+
+    @staticmethod
+    def _try(c: PortalClient, url: str, bodies: list[dict[str, Any]]):
+        last = None
+        for b in bodies:
+            try:
+                return c.call("POST", url, b), b
+            except BankError as exc:
+                last = exc
+                if "HTTP 5" not in str(exc) and "HTTP 4" not in str(exc):
+                    raise
+        raise last
 
     def _card(self, c: PortalClient, rec, nombre, since: date) -> None:
-        body, cur = self._card_body(rec["p"], nombre), rec["acct"].currency
-        s = c.call("POST", BASE + "tarjeta-credito-digital/saldo/obtener-saldo", body) or {}
+        cur = rec["acct"].currency
+        bodies = self._card_bodies(c, rec["p"], nombre)
+        rec["debug"] = {"bodies": len(bodies), "body_keys": {k: (str(v) and re.sub(r"\d", "9", str(v))[:30])
+                                                            for k, v in bodies[0].items() if k != "nombreTitular"}}
+        s, body = self._try(c, BASE + "tarjeta-credito-digital/saldo/obtener-saldo", bodies)
+        s = s or {}
         rec["bal"] = Balance(rec["acct"].external_id, cur, -clp(s.get("cupoUtilizadoNacional")),
                              clp(s.get("cupoDisponibleNacional")), date.today())
         r = c.call("POST", BASE + "tarjeta-credito-digital/movimientos-no-facturados", body) or {}
