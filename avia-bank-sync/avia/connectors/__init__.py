@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from .base import BankConnector
-from .portal import BancoChilePortal, ItauPortal, RipleyPortal
+from .bancochile import BancoChilePortal
+from .portal import ItauPortal, RipleyPortal
 from .sandbox import SandboxConnector
 
 REGISTRY: dict[str, type[BankConnector]] = {

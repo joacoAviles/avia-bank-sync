@@ -43,11 +43,6 @@ class PortalConnector(BankConnector):
         self._pending()
 
 
-class BancoChilePortal(PortalConnector):
-    bank_id = portal_id = "banco-chile"
-    display_name = "Banco de Chile"
-
-
 class ItauPortal(PortalConnector):
     bank_id = portal_id = "itau"
     display_name = "Itaú Chile"
