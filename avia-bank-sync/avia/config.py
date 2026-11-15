@@ -36,7 +36,7 @@ class Settings:
     overlap_days: int = 10
     initial_history_days: int = 90
     max_history_days: int = 365
-    enabled_connectors: list[str] = field(default_factory=lambda: ["sandbox", "banco_chile", "itau", "ripley", "banco_estado"])
+    enabled_connectors: list[str] = field(default_factory=lambda: ["sandbox", "banco_chile", "itau", "ripley", "banco_estado", "mercado_pago"])
     notify_webhook_url: str | None = None
     actual_runner_url: str | None = None
     log_level: str = "INFO"
@@ -69,7 +69,7 @@ def get_settings() -> Settings:
         initial_history_days=int(_env("AVIA_INITIAL_HISTORY_DAYS", "90") or 90),
         max_history_days=int(_env("AVIA_MAX_HISTORY_DAYS", "365") or 365),
         enabled_connectors=[
-            c.strip() for c in (_env("AVIA_ENABLED_CONNECTORS", "sandbox,banco_chile,itau,ripley,banco_estado") or "").split(",") if c.strip()
+            c.strip() for c in (_env("AVIA_ENABLED_CONNECTORS", "sandbox,banco_chile,itau,ripley,banco_estado,mercado_pago") or "").split(",") if c.strip()
         ],
         notify_webhook_url=_env("AVIA_NOTIFY_WEBHOOK_URL"),
         actual_runner_url=_env("AVIA_ACTUAL_RUNNER_URL"),

@@ -47,7 +47,7 @@ services:
       AVIA_DATABASE_URL_FILE: /run/secrets/database_url
       AVIA_API_TOKEN_FILE: /run/secrets/api_token
       AVIA_ENCRYPTION_KEYS_FILE: /run/secrets/encryption_keys
-      AVIA_ENABLED_CONNECTORS: ${AVIA_ENABLED_CONNECTORS:-sandbox,banco_chile,itau,ripley,banco_estado}
+      AVIA_ENABLED_CONNECTORS: ${AVIA_ENABLED_CONNECTORS:-sandbox,banco_chile,itau,ripley,banco_estado,mercado_pago}
       AVIA_DAILY_SYNC_HOUR: ${AVIA_DAILY_SYNC_HOUR:-6}
       AVIA_DAILY_SYNC_MINUTE: ${AVIA_DAILY_SYNC_MINUTE:-15}
       AVIA_FRESHNESS_HOURS: ${AVIA_FRESHNESS_HOURS:-12}
