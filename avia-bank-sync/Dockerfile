@@ -24,6 +24,7 @@ RUN pip install -r requirements.txt
 
 COPY avia ./avia
 COPY database ./database
+RUN chmod -R a+rX /app
 
 USER avia
 EXPOSE 8000
