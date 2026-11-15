@@ -197,7 +197,9 @@ def login_input(sid: str, body: LoginInputIn):
 @app.get("/v1/accounts", dependencies=auth)
 def accounts():
     accs = state.service.accounts()
-    if not accs and state.service.status()["configured"]:
+    st0 = state.service.status()
+    sin_cuentas = any(c["status"] != "disconnected" and not c["accounts"] for c in st0["connections"])
+    if (not accs or sin_cuentas) and st0["configured"]:
         # Primera vez: aún no hay cuentas guardadas. Lanzar la extracción y esperar hasta ~50 s
         # (Actual corta a los 60 s). Si no alcanza, la sincronización sigue en segundo plano
         # y al reabrir «Enlazar cuenta» ya estarán.
