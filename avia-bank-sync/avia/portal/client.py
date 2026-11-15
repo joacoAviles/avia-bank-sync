@@ -50,7 +50,7 @@ class PortalClient:
         self._pw = sync_playwright().start()
         o = browser_settings()
         self._browser = self._pw.chromium.launch(
-            headless=True, executable_path=o["executable_path"],
+            headless=o["headless"], executable_path=o["executable_path"],
             args=["--no-first-run", "--no-default-browser-check", "--disable-dev-shm-usage"])
         self._ctx = self._browser.new_context(storage_state=self.state or None, viewport=VIEWPORT, locale="es-CL",
                                               timezone_id="America/Santiago")
