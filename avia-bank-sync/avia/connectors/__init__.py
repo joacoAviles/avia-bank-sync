@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from .base import BankConnector
 from .bancochile import BancoChilePortal
-from .portal import ItauPortal
+from .portal import BancoEstadoPortal, ItauPortal
 from .ripley import RipleyPortal
 from .sandbox import SandboxConnector
 
@@ -13,6 +13,7 @@ REGISTRY: dict[str, type[BankConnector]] = {
     "banco_chile": BancoChilePortal,
     "itau": ItauPortal,
     "ripley": RipleyPortal,
+    "banco_estado": BancoEstadoPortal,
 }
 
 

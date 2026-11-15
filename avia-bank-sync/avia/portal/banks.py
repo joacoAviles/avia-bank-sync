@@ -65,6 +65,21 @@ PORTALS: dict[str, PortalConfig] = {
         login_url_markers=("/wps/portal/newolb/web/login",),
         notes="reCAPTCHA v3 invisible: el banco puede rechazar el ingreso automatizado.",
     ),
+    # Login en modal sobre la home pública (bancoestado.cl); campos #rut / #pass / #btnLogin
+    "banco-estado": PortalConfig(
+        bank_id="banco-estado",
+        name="BancoEstado",
+        login_url="https://www.bancoestado.cl/content/bancoestado-public/cl/es/home/home.html",
+        rut_selector="#rut",
+        password_selector="#pass",
+        submit_selector="#btnLogin",
+        rut_style="plain",  # el campo pide «12345678k», sin puntos ni guion
+        pre_clicks=('a:has-text("Banca en Línea")',),
+        # Autenticado = cualquier página de bancoestado.cl fuera de la home pública
+        success_url=re.compile(r"^https://(?!www\.bancoestado\.cl/content/bancoestado-public/)[a-z0-9.-]*bancoestado\.cl/", re.I),
+        login_url_markers=("bancoestado-public", "#/login", "login-bech"),
+        notes="Campos verificados el 2026-11-15 sin iniciar sesión. URL de éxito por confirmar en el primer ingreso real.",
+    ),
     # Angular 18 (web.bancoripley.cl): /onboarding -> /login -> área privada
     "ripley": PortalConfig(
         bank_id="ripley",

@@ -51,3 +51,11 @@ class ItauPortal(PortalConnector):
     def availability(cls):
         return {"available": False, "doc": None,
                 "reason": "Itaú no disponible: su portal bloquea los ingresos automatizados (Error 15)."}
+
+
+class BancoEstadoPortal(PortalConnector):
+    """Login listo (RUT + clave). La lectura de datos se implementa tras el reconocimiento
+    (`python -m avia.recon banco-estado`) con una sesión iniciada por el titular."""
+
+    bank_id = portal_id = "banco-estado"
+    display_name = "BancoEstado"
