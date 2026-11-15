@@ -37,7 +37,7 @@ HOOK_JS = """
     try {
       if (r && typeof r === 'object') {
         const o = Array.isArray(r) ? (r[0] && typeof r[0] === 'object' ? r[0] : null) : r;
-        if (o && ('isDebit' in o || 'checkingAccounts' in o || 'movements' in o || 'dueDate' in o)) {
+        if (o && ('isDebit' in o || 'checkingAccounts' in o || 'movements' in o || 'dueDate' in o || 'ResponseDepositAccount' in o)) {
           window.__aviaCap.push(r);
         }
       }
@@ -141,9 +141,41 @@ class RipleyPortal(PortalConnector):
                     self._read_card(page, cards[0], since)
                 except BankError as exc:
                     cards[0]["error"] = str(exc)
+            self._read_deposits(page, data)
             self.diagnostics = c.log
         self._data = data
         return data
+
+    def _read_deposits(self, page, data) -> None:
+        """Depósitos a plazo: una cuenta «Depósitos a plazo» con el total al vencimiento en CLP.
+
+        Aún no hay muestra de un depósito vigente: el saldo sale de Deposit.maturityAmountTotalCLP y el
+        detalle de DepositTransactionReference se deja en el diagnóstico para afinar el mapeo.
+        """
+        acct = BankAccount("ripley-dap", "Depósitos a plazo", "savings", "CLP", "DAP")
+        rec = {"acct": acct, "txs": [], "bal": None, "error": None}
+        data[acct.external_id] = rec
+        try:
+            page.goto(f"{HOME}/depositos-a-plazo", wait_until="domcontentloaded", timeout=45000)
+            pred = "o => !Array.isArray(o) && o.ResponseDepositAccount && o.ResponseDepositAccount.Deposit"
+            got = self._wait_cap(page, pred, 25)
+            page.wait_for_timeout(2000)
+            allr = self._cap(page, "o => !Array.isArray(o) && !!o.ResponseDepositAccount")
+            total, items = None, []
+            for g in allr:
+                r = g["ResponseDepositAccount"]
+                dep = r.get("Deposit")
+                if isinstance(dep, dict) and dep.get("maturityAmountTotalCLP") is not None:
+                    total = clp(dep.get("maturityAmountTotalCLP"))
+                items += r.get("DepositTransactionReference") or []
+            self.debug["dap_items"] = len(items)
+            self.debug["dap_item_keys"] = sorted({k for it in items if isinstance(it, dict) for k in it})[:40]
+            if total is None and not got:
+                rec["error"] = "Banco Ripley: la página de depósitos no entregó datos"
+                return
+            rec["bal"] = Balance(acct.external_id, "CLP", total or Decimal(0), None, date.today())
+        except Exception as exc:  # noqa: BLE001
+            rec["error"] = f"Banco Ripley: depósitos a plazo ({type(exc).__name__})"
 
     def _read_checking(self, page, rec, since: date) -> None:
         page.goto(f"{HOME}/account-balance/accounts;id={rec['acct'].external_id}", wait_until="domcontentloaded",
