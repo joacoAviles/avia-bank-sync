@@ -198,16 +198,16 @@ def login_input(sid: str, body: LoginInputIn):
 def accounts():
     accs = state.service.accounts()
     if not accs and state.service.status()["configured"]:
-        # Primera vez: aún no se ha sincronizado nunca. Extraer ahora (bloquea hasta terminar)
-        # para que «Enlazar cuenta» muestre las cuentas sin pasos manuales.
+        # Primera vez: aún no hay cuentas guardadas. Lanzar la extracción y esperar hasta ~50 s
+        # (Actual corta a los 60 s). Si no alcanza, la sincronización sigue en segundo plano
+        # y al reabrir «Enlazar cuenta» ya estarán.
         import time
-        try:
-            state.service.engine.run("manual")
-        except SyncInProgress:
-            for _ in range(120):
-                time.sleep(1)
-                if not db.sync_lock_held():
-                    break
+        log.info("accounts vacío: sincronizando por primera vez")
+        state.service.start_background_sync("manual")
+        for _ in range(50):
+            time.sleep(1)
+            if not (state.service._bg and state.service._bg.is_alive()) and not db.sync_lock_held():
+                break
         accs = state.service.accounts()
     return {"accounts": accs}
 
