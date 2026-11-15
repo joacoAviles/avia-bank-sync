@@ -29,8 +29,8 @@ def mask_txt(s: str) -> str:
 def main(bank: str) -> None:
     key = bank.replace("-", "_")
     cls = REGISTRY[key]
-    state = load_state(bank)
-    c = cls({"storage_state": state})
+    creds = load_state(bank, full=True)
+    c = cls(creds)
     since = date.today() - timedelta(days=45)
     try:
         c.authenticate()

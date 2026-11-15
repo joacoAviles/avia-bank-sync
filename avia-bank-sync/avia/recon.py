@@ -64,7 +64,7 @@ def mask_label(t: str) -> str:
     return re.sub(r"\d", "9", t)[:50]
 
 
-def load_state(bank_id: str):
+def load_state(bank_id: str, full: bool = False):
     s = get_settings()
     db.init_pool(s.database_url)
     box = SecretBox(s.encryption_keys)
@@ -74,7 +74,8 @@ def load_state(bank_id: str):
         if not row:
             sys.exit(f"No hay conexión de {bank_id}: inicia sesión primero desde Actual.")
         cred = conn.execute("SELECT ciphertext FROM credentials WHERE connection_id = %s", (row["id"],)).fetchone()
-    return box.decrypt(cred["ciphertext"]).get("storage_state")
+    data = box.decrypt(cred["ciphertext"])
+    return data if full else data.get("storage_state")
 
 
 def main(bank_id: str) -> None:

@@ -32,9 +32,11 @@ async ({method, url, body, headers}) => {
 
 
 class PortalClient:
-    def __init__(self, portal: PortalConfig, storage_state: dict[str, Any] | None, api_marker: str):
+    def __init__(self, portal: PortalConfig, credentials: dict[str, Any], api_marker: str):
         self.portal = portal
-        self.state = storage_state
+        self.creds = credentials or {}
+        self.state = self.creds.get("storage_state")
+        self.new_state: dict[str, Any] | None = None
         self.api_marker = api_marker
         self.headers: dict[str, str] = {}
         self.log: list[tuple[str, str, int]] = []  # (método, ruta, estado) para diagnóstico
@@ -43,26 +45,76 @@ class PortalClient:
     def __enter__(self) -> "PortalClient":
         from playwright.sync_api import sync_playwright
 
-        if not self.state:
-            raise AuthorizationRequired("No hay sesión guardada: inicia sesión en Bancos chilenos.")
+        if not self.state and not (self.creds.get("rut") and self.creds.get("password")):
+            raise AuthorizationRequired("No hay credenciales guardadas: inicia sesión en Bancos chilenos.")
         self._pw = sync_playwright().start()
         o = browser_settings()
         self._browser = self._pw.chromium.launch(
             headless=True, executable_path=o["executable_path"],
             args=["--no-first-run", "--no-default-browser-check", "--disable-dev-shm-usage"])
-        self._ctx = self._browser.new_context(storage_state=self.state, viewport=VIEWPORT, locale="es-CL",
+        self._ctx = self._browser.new_context(storage_state=self.state or None, viewport=VIEWPORT, locale="es-CL",
                                               timezone_id="America/Santiago")
         self.page = self._ctx.new_page()
         self.page.on("request", self._on_request)
         try:
-            self.page.goto(self.portal.login_url, wait_until="domcontentloaded", timeout=45000)
-            self.page.wait_for_url(lambda u: self.portal.is_success(u), timeout=30000)
+            if not self._session_ok():
+                self._login()
             self.page.wait_for_load_state("networkidle", timeout=20000)
-        except Exception as exc:  # noqa: BLE001
+            self.new_state = self._ctx.storage_state()
+        except AuthorizationRequired:
             self.__exit__(None, None, None)
-            raise AuthorizationRequired(f"La sesión con {self.portal.name} expiró; vuelve a iniciar sesión "
-                                        f"({type(exc).__name__}).") from exc
+            raise
+        except Exception as exc:  # noqa: BLE001
+            where = self._where()
+            self.__exit__(None, None, None)
+            raise AuthorizationRequired(f"No se pudo entrar a {self.portal.name} ({type(exc).__name__}; "
+                                        f"página: {where}).") from exc
         return self
+
+    def _where(self) -> str:
+        try:
+            from urllib.parse import urlsplit
+            u = urlsplit(self.page.url)
+            return f"{u.netloc}{u.path}"[:100]
+        except Exception:  # noqa: BLE001
+            return "?"
+
+    def _session_ok(self) -> bool:
+        if not self.state:
+            return False
+        try:
+            self.page.goto(self.portal.login_url, wait_until="domcontentloaded", timeout=45000)
+            self.page.wait_for_url(lambda u: self.portal.is_success(u), timeout=20000)
+            return True
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _login(self) -> None:
+        """Ingreso automático con RUT y clave guardados (como lo haría el titular)."""
+        from . import rut as rutlib
+
+        p = self.portal
+        if not (self.creds.get("rut") and self.creds.get("password")):
+            raise AuthorizationRequired(f"La sesión con {p.name} expiró; vuelve a iniciar sesión.")
+        self.page.goto(p.login_url, wait_until="domcontentloaded", timeout=45000)
+        for sel in p.pre_clicks:
+            try:
+                self.page.locator(sel).first.click(timeout=15000)
+            except Exception:  # noqa: BLE001
+                pass
+        self.page.locator(p.rut_selector).first.wait_for(state="visible", timeout=30000)
+        self.page.locator(p.rut_selector).first.click()
+        self.page.locator(p.rut_selector).first.press_sequentially(rutlib.fmt(self.creds["rut"], p.rut_style), delay=60)
+        self.page.locator(p.password_selector).first.click()
+        self.page.locator(p.password_selector).first.press_sequentially(self.creds["password"], delay=60)
+        self.page.wait_for_timeout(400)
+        self.page.locator(p.submit_selector).first.click()
+        try:
+            self.page.wait_for_url(lambda u: p.is_success(u), timeout=60000)
+        except Exception as exc:  # noqa: BLE001
+            raise AuthorizationRequired(
+                f"{p.name} no dejó entrar automáticamente (¿clave cambiada, segundo factor o verificación?). "
+                f"Vuelve a iniciar sesión desde Actual. Página: {self._where()}") from exc
 
     def __exit__(self, *exc) -> None:
         for closer in (lambda: self._browser and self._browser.close(), lambda: self._pw and self._pw.stop()):

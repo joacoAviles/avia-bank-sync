@@ -82,7 +82,7 @@ class BancoChilePortal(PortalConnector):
         since = since or (date.today() - timedelta(days=90))
         data: dict[str, dict[str, Any]] = {}
         portal = PORTALS[self.portal_id]
-        with PortalClient(portal, self.credentials.get("storage_state"), "/mibancochile/rest/") as c:
+        with PortalClient(portal, self.credentials, "/mibancochile/rest/") as c:
             self.diagnostics = c.log  # referencia viva: sirve aunque algo falle más abajo
             prods = c.call("GET", BASE + "selectorproductos/selectorProductos/obtenerProductos?incluirTarjetas=true")
             rut, nombre = (prods or {}).get("rut"), (prods or {}).get("nombre")
