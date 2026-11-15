@@ -229,6 +229,10 @@ class AviaService:
                              (cid, institution, label or f"{bank_name} · {rutlib.mask(rut)}"))
                 repo.event(conn, "info", "portal_login", f"Conexión creada con {bank_name}", connection_id=cid)
             self.engine.store_credentials(conn, cid, creds)
+        try:  # cada ingreso exitoso lee de inmediato las cuentas de ese banco
+            self.start_background_sync("manual", [cid])
+        except Exception:  # noqa: BLE001
+            pass
         return {"connectionId": cid}
 
     def login_status(self, sid: str, include_screenshot: bool = True) -> dict[str, Any]:
