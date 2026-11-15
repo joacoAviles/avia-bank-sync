@@ -62,7 +62,10 @@ class PortalClient:
         try:
             if not self._session_ok():
                 self._login()
-            self.page.wait_for_load_state("networkidle", timeout=20000)
+            try:
+                self.page.wait_for_load_state("networkidle", timeout=15000)
+            except Exception:  # noqa: BLE001 - portales con llamadas constantes nunca quedan «en reposo»
+                pass
             self.new_state = self._ctx.storage_state()
         except AuthorizationRequired:
             self.__exit__(None, None, None)
