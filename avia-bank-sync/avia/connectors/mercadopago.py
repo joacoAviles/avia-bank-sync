@@ -14,6 +14,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import os
 import time
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -95,7 +96,7 @@ class MercadoPagoConnector(BankConnector):
     auth_method = "access_token"
     capabilities = frozenset({Capability.ACCOUNTS, Capability.BALANCES, Capability.TRANSACTIONS, Capability.HISTORY})
     setup_fields = (
-        {"name": "access_token", "label": "Access Token (producción)", "type": "password", "required": True},
+        {"name": "access_token", "label": "Access Token (producción)", "type": "password", "required": False},
     )
     # Inyectable en pruebas
     client_factory = staticmethod(lambda: httpx.Client(base_url=API, timeout=60))
@@ -106,10 +107,15 @@ class MercadoPagoConnector(BankConnector):
         self._last_balance: Decimal | None = None
 
     # ------------------------------------------------------------------
+    def _token(self) -> str:
+        # La UI de Actual no tiene campo para el token: se entrega una sola vez por AVIA_MP_ACCESS_TOKEN
+        # (.env del servidor) y desde ahí queda guardado cifrado en la base; luego se puede borrar del .env.
+        return (self.credentials.get("access_token") or os.environ.get("AVIA_MP_ACCESS_TOKEN") or "").strip()
+
     def _client(self) -> httpx.Client:
-        tok = (self.credentials.get("access_token") or "").strip()
+        tok = self._token()
         if not tok:
-            raise AuthorizationRequired("Falta el Access Token de Mercado Pago")
+            raise AuthorizationRequired("Falta el Access Token: ponlo en AVIA_MP_ACCESS_TOKEN en el .env del servidor y recrea avia-api")
         c = self.client_factory()
         c.headers["Authorization"] = f"Bearer {tok}"
         c.headers["accept"] = "application/json"
@@ -128,7 +134,7 @@ class MercadoPagoConnector(BankConnector):
         site = str(me.get("site_id", ""))
         if site and site != "MLC":
             raise AuthorizationRequired(f"La cuenta es de otro país ({site}); se esperaba Mercado Pago Chile (MLC)")
-        self.credentials = {**self.credentials, "user_id": str(me.get("id", ""))}
+        self.credentials = {**self.credentials, "access_token": self._token(), "user_id": str(me.get("id", ""))}
         return self.credentials
 
     def get_accounts(self) -> list[BankAccount]:

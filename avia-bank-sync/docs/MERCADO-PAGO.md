@@ -2,7 +2,7 @@
 
 **Estado: implementado, pendiente de primera prueba con un token real.**
 
-- Autorización: Access Token de producción del titular (Mercado Pago Developers → Tus integraciones → Credenciales).
+- Autorización: Access Token de producción del titular, entregado una vez por `AVIA_MP_ACCESS_TOKEN` en el `.env` del servidor (la UI de Actual no tiene campo para tokens) (Mercado Pago Developers → Tus integraciones → Credenciales).
   Se guarda cifrado; no se usa RUT ni clave.
 - Datos: «Reporte de liberaciones» de la API oficial (`/v1/account/release_report`). Es asíncrono: AVIA pide un
   rango (tramos de 60 días), espera a que aparezca en la lista y descarga el CSV. Cada fila es un movimiento real

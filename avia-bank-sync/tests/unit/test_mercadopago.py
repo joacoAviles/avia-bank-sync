@@ -101,3 +101,12 @@ def test_rejects_other_country_and_bad_token(monkeypatch):
         MercadoPagoConnector({"access_token": "x"}).authenticate()
     with pytest.raises(AuthorizationRequired):
         MercadoPagoConnector({}).authenticate()
+
+
+def test_token_from_env_is_persisted(monkeypatch):
+    monkeypatch.setenv("AVIA_MP_ACCESS_TOKEN", "ENVTOK")
+    monkeypatch.setattr(MercadoPagoConnector, "client_factory", staticmethod(_mock(
+        lambda r: httpx.Response(200, json={"id": 7, "site_id": "MLC"}) if r.headers["authorization"] == "Bearer ENVTOK"
+        else httpx.Response(401))))
+    creds = MercadoPagoConnector({}).authenticate()
+    assert creds["access_token"] == "ENVTOK" and creds["user_id"] == "7"
