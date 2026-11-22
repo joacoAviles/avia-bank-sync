@@ -159,8 +159,16 @@ def test_cancel(fake_bank):
     assert wait(sess, {"cancelled"}) == "cancelled"
 
 
-def test_service_flow_creates_encrypted_connection(fake_bank, service):
+def test_service_flow_creates_encrypted_connection(fake_bank, service, monkeypatch):
     FakeBank.mode = "ok"
+    # Banco de Chile ya lee cuentas desde su API REST real, que el portal falso no tiene.
+    # Cada login exitoso dispara una lectura inmediata (síncrona en pruebas), así que se simula «lectura pendiente».
+    from avia.connectors.bancochile import BancoChilePortal
+    from avia.connectors.portal import ExtractionPending
+
+    def pendiente(self):
+        raise ExtractionPending("lectura pendiente (simulada)")
+    monkeypatch.setattr(BancoChilePortal, "get_accounts", pendiente)
     service.logins = LoginManager(portals={"banco-chile": fake_config(fake_bank)})
     inst = {i["id"]: i for i in service.institutions()}
     assert inst["banco-chile"]["available"] and inst["banco-chile"]["authMethod"] == "portal_login"
@@ -174,8 +182,7 @@ def test_service_flow_creates_encrypted_connection(fake_bank, service):
     assert row["status"] == "connected" and row["label"].endswith("111-1")
     creds = service.engine.build_connector({**row, "connector": "banco_chile"}).credentials
     assert creds["rut"] == "111111111" and creds["storage_state"]["cookies"]
-    # La sincronización no marca error: registra que falta la extracción
-    res = service.engine.run("manual", [cid])
+    res = service.engine.run("manual", [cid])  # ni la lectura tras el login ni esta marcan error
     assert res["status"] == "succeeded" and res["stats"]["pending_extraction"] == [cid]
     assert q("SELECT status FROM connections WHERE id = %s", cid)[0]["status"] == "connected"
 
@@ -192,8 +199,11 @@ def test_service_validates_input(service):
         service.login_start("banco-chile", "11.111.111-2", "x", None)
     assert e.value.code == "INVALID_RUT"
     with pytest.raises(ServiceError) as e:
-        service.create_connection("itau", None, {})
+        service.create_connection("ripley", None, {})
     assert e.value.code == "USE_LOGIN_FLOW"
+    with pytest.raises(ServiceError) as e:
+        service.create_connection("itau", None, {})
+    assert e.value.code == "INSTITUTION_BLOCKED"
     with pytest.raises(ServiceError) as e:
         service.login_start("sandbox", VALID_RUT, "x", None)
     assert e.value.code == "NOT_A_PORTAL"

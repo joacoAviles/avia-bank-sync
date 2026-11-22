@@ -13,6 +13,7 @@ _STD = set(vars(logging.makeLogRecord({})).keys()) | {"message", "asctime"}
 
 
 def _redact(value):
+    """Oculta valores de claves sensibles (password, token, rut…) en los logs."""
     if isinstance(value, dict):
         return {k: ("[REDACTED]" if _REDACT_KEYS.search(k) else _redact(v)) for k, v in value.items()}
     if isinstance(value, list):
@@ -21,7 +22,9 @@ def _redact(value):
 
 
 class JsonFormatter(logging.Formatter):
+    """Formato de log JSON de una línea."""
     def format(self, record: logging.LogRecord) -> str:
+        """Arma el JSON con hora, nivel, mensaje y extras redactados."""
         payload = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             "level": record.levelname.lower(),
@@ -37,6 +40,7 @@ class JsonFormatter(logging.Formatter):
 
 
 def setup_logging(level: str = "INFO") -> None:
+    """Configura logs JSON a stdout y baja el ruido de uvicorn.access."""
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(JsonFormatter())
     root = logging.getLogger()

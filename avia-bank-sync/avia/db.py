@@ -25,6 +25,7 @@ _pool: ConnectionPool | None = None
 
 
 def init_pool(dsn: str, *, min_size: int = 1, max_size: int = 8) -> ConnectionPool:
+    """Crea el pool de conexiones (filas como dict, sin autocommit)."""
     global _pool
     if _pool is None:
         _pool = ConnectionPool(
@@ -38,6 +39,7 @@ def init_pool(dsn: str, *, min_size: int = 1, max_size: int = 8) -> ConnectionPo
 
 
 def close_pool() -> None:
+    """Cierra el pool."""
     global _pool
     if _pool is not None:
         _pool.close()
@@ -45,6 +47,7 @@ def close_pool() -> None:
 
 
 def pool() -> ConnectionPool:
+    """Pool activo; falla si no se inicializó."""
     if _pool is None:
         raise RuntimeError("Pool no inicializado")
     return _pool
@@ -102,6 +105,7 @@ def sync_lock() -> Iterator[bool]:
 
 
 def sync_lock_held() -> bool:
+    """Si algún proceso tiene tomado el lock de sincronización."""
     with pool().connection() as conn:
         row = conn.execute(
             "SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND granted"

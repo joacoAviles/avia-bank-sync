@@ -15,6 +15,7 @@ from ..connectors.base import BankAccount, BankTransaction
 
 def event(conn: psycopg.Connection, level: str, event_type: str, message: str, *, run_id=None,
           connection_id=None, bank_account_id=None, data: dict[str, Any] | None = None) -> None:
+    """Registra un evento en la bitácora sync_events."""
     conn.execute(
         "INSERT INTO sync_events (run_id, connection_id, bank_account_id, level, event_type, message, data)"
         " VALUES (%s,%s,%s,%s,%s,%s,%s)",
@@ -23,10 +24,12 @@ def event(conn: psycopg.Connection, level: str, event_type: str, message: str, *
 
 
 def lineage_id(bank_id: str, account_external_id: str, external_id: str) -> str:
+    """ID estable de un movimiento en Actual: avia:<banco>:<cuenta>:<id banco>."""
     return f"avia:{bank_id}:{account_external_id}:{external_id}"
 
 
 def upsert_bank_account(conn, connection_id, acct: BankAccount) -> uuid.UUID:
+    """Crea o actualiza una cuenta bancaria y devuelve su id."""
     row = conn.execute(
         """
         INSERT INTO bank_accounts (id, connection_id, external_id, name, account_type, currency, masked_number)
@@ -43,6 +46,7 @@ def upsert_bank_account(conn, connection_id, acct: BankAccount) -> uuid.UUID:
 
 
 def find_by_identifier(conn, bank_account_id, scheme: str, value: str) -> dict | None:
+    """Busca un movimiento por uno de sus identificadores (bank_id, referencia…)."""
     return conn.execute(
         "SELECT t.* FROM transaction_identifiers i JOIN transactions t ON t.id = i.transaction_id"
         " WHERE i.bank_account_id = %s AND i.scheme = %s AND i.value = %s",
@@ -51,6 +55,7 @@ def find_by_identifier(conn, bank_account_id, scheme: str, value: str) -> dict |
 
 
 def add_identifier(conn, transaction_id, bank_account_id, scheme: str, value: str) -> None:
+    """Agrega un identificador a un movimiento (sin duplicar)."""
     conn.execute(
         "INSERT INTO transaction_identifiers (transaction_id, bank_account_id, scheme, value)"
         " VALUES (%s,%s,%s,%s) ON CONFLICT DO NOTHING",
@@ -60,6 +65,7 @@ def add_identifier(conn, transaction_id, bank_account_id, scheme: str, value: st
 
 def insert_transaction(conn, *, bank_account_id, lineage: str, t: BankTransaction, run_id,
                        needs_review=False, review_reason=None) -> uuid.UUID:
+    """Inserta un movimiento nuevo con su linaje y marca de revisión."""
     tid = uuid.uuid4()
     conn.execute(
         """
@@ -82,6 +88,7 @@ TRACKED = ("status", "booked_date", "value_date", "amount", "currency", "descrip
 
 
 def apply_update(conn, existing: dict, t: BankTransaction, run_id) -> list[str]:
+    """Actualiza los campos que cambiaron; nunca baja un contabilizado a pendiente."""
     changed = [f for f in TRACKED if _norm(existing[f]) != _norm(getattr(t, f))]
     if existing["status"] == "booked" and t.status == "pending":
         # nunca degradar un contabilizado a pendiente
@@ -113,12 +120,14 @@ def promote_pending(conn, pending: dict, t: BankTransaction, run_id) -> None:
 
 
 def _norm(v):
+    """Normaliza Decimal para comparar sin falsos cambios."""
     if isinstance(v, Decimal):
         return v.normalize()
     return v
 
 
 def _desc_key(s: str | None) -> str:
+    """Clave corta de descripción (10 alfanuméricos en mayúscula) para emparejar pendiente↔contabilizado."""
     return "".join(ch for ch in (s or "").upper() if ch.isalnum())[:10]
 
 
@@ -146,6 +155,7 @@ def conservative_pending_match(conn, bank_account_id, t: BankTransaction) -> tup
 
 
 def stale_pendings(conn, bank_account_id, since: date, seen_external_ids: set[str]) -> list[dict]:
+    """Pendientes desde `since` que el banco ya no informa (posibles reversas)."""
     rows = conn.execute(
         """
         SELECT t.*, array_agg(i.value) FILTER (WHERE i.scheme = 'bank_id') AS bank_ids
@@ -159,12 +169,14 @@ def stale_pendings(conn, bank_account_id, since: date, seen_external_ids: set[st
 
 
 def get_cursor(conn, bank_account_id) -> date | None:
+    """Última fecha contabilizada confirmada de una cuenta."""
     row = conn.execute("SELECT last_booked_date FROM sync_cursors WHERE bank_account_id = %s",
                        (bank_account_id,)).fetchone()
     return row["last_booked_date"] if row else None
 
 
 def set_cursor(conn, bank_account_id, last_booked: date | None, run_id) -> None:
+    """Avanza el cursor de la cuenta (nunca retrocede)."""
     conn.execute(
         """
         INSERT INTO sync_cursors (bank_account_id, last_booked_date, run_id) VALUES (%s,%s,%s)
@@ -177,6 +189,7 @@ def set_cursor(conn, bank_account_id, last_booked: date | None, run_id) -> None:
 
 
 def upsert_balance(conn, bank_account_id, snapshot_date: date, booked, available, currency) -> None:
+    """Guarda el saldo del día y recalcula la diferencia con Actual."""
     conn.execute(
         """
         INSERT INTO balance_snapshots (bank_account_id, snapshot_date, booked, available, currency)

@@ -11,6 +11,7 @@ from . import repo
 
 
 def pair_card_payments(conn, run_id) -> int:
+    """Empareja pagos de tarjeta (salida en cuenta ↔ abono en tarjeta) como transferencia."""
     outs = conn.execute(
         """
         SELECT t.*, i.value AS ref FROM transactions t

@@ -14,19 +14,23 @@ KEEP_FINISHED_S = 600
 
 
 class LoginManager:
+    """Administra las sesiones de ingreso en curso (una por banco a la vez)."""
     def __init__(self, portals: dict[str, PortalConfig] | None = None, login_url_override: dict[str, str] | None = None):
+        """Portales disponibles (reales o de prueba) y registro de sesiones."""
         self.portals = portals or PORTALS
         self.login_url_override = login_url_override or {}
         self._sessions: dict[str, LoginSession] = {}
         self._lock = threading.Lock()
 
     def _gc(self) -> None:
+        """Borra sesiones terminadas hace rato."""
         now = time.time()
         for sid in [s for s, v in self._sessions.items() if v.state in FINAL and now - v.updated_at > KEEP_FINISHED_S]:
             del self._sessions[sid]
 
     def start(self, bank_id: str, rut: str, password: str,
               on_success: Callable[[LoginSession, LoginResult], dict[str, Any]], **kw) -> LoginSession:
+        """Inicia un ingreso; cancela otro activo del mismo banco y rechaza si hay demasiados en curso."""
         portal = self.portals[bank_id]
         with self._lock:
             self._gc()
@@ -43,4 +47,5 @@ class LoginManager:
         return sess
 
     def get(self, sid: str) -> LoginSession | None:
+        """Sesión de ingreso por id."""
         return self._sessions.get(sid)

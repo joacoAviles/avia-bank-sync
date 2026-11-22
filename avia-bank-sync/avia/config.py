@@ -8,6 +8,7 @@ from functools import lru_cache
 
 
 def _env(name: str, default: str | None = None, *, required: bool = False) -> str | None:
+    """Lee una variable de entorno; si es obligatoria y falta, falla con su nombre."""
     value = os.environ.get(name, default)
     if required and not value:
         raise RuntimeError(f"Falta la variable de entorno obligatoria {name}")
@@ -25,6 +26,7 @@ def _read_secret(name: str) -> str | None:
 
 @dataclass(frozen=True)
 class Settings:
+    """Configuración del servicio leída del entorno (base, token, llaves, horario, conectores)."""
     database_url: str
     api_token: str
     encryption_keys: list[str]
@@ -43,6 +45,7 @@ class Settings:
 
 
 def _require(value: str | None, name: str) -> str:
+    """Falla si falta un valor obligatorio (o su variante _FILE)."""
     if not value:
         raise RuntimeError(f"Falta la variable de entorno obligatoria {name} (o {name}_FILE)")
     return value
@@ -50,6 +53,7 @@ def _require(value: str | None, name: str) -> str:
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
+    """Construye Settings validando token (≥32), llaves Fernet y valores numéricos."""
     keys = _read_secret("AVIA_ENCRYPTION_KEYS") or ""
     token = _read_secret("AVIA_API_TOKEN") or ""
     if len(token) < 32:

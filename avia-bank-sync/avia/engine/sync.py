@@ -29,10 +29,12 @@ VALID_STATUS = {"pending", "booked"}
 
 
 class SyncInProgress(Exception):
+    """Ya hay otra sincronización tomando el lock."""
     pass
 
 
 def _validate(t: BankTransaction, currency: str) -> str | None:
+    """Revisa que un movimiento sea válido; devuelve el motivo si no lo es."""
     if not t.external_id:
         return "sin identificador bancario"
     if t.status not in VALID_STATUS:
@@ -49,12 +51,15 @@ def _validate(t: BankTransaction, currency: str) -> str | None:
 
 
 class SyncEngine:
+    """Motor de sincronización: por cada conexión lee el banco y guarda sin duplicar."""
     def __init__(self, settings, box: SecretBox, today=None):
+        """Recibe configuración, caja de cifrado y un reloj opcional (pruebas)."""
         self.settings = settings
         self.box = box
         self._today = today
 
     def today(self) -> date:
+        """Fecha de hoy en la zona configurada (o la del reloj de pruebas)."""
         if self._today:
             return self._today()
         from datetime import datetime
@@ -63,6 +68,7 @@ class SyncEngine:
 
     # ------------------------------------------------------------------ API
     def run(self, trigger: str, connection_ids: list[str] | None = None) -> dict[str, Any]:
+        """Ejecuta una sincronización completa bajo lock y devuelve estado y estadísticas."""
         with db.sync_lock() as got:
             if not got:
                 raise SyncInProgress("Ya existe una sincronización en curso")
@@ -94,6 +100,7 @@ class SyncEngine:
 
     # ------------------------------------------------------------- internos
     def _connections(self, ids):
+        """Conexiones activas a sincronizar (todas o las pedidas)."""
         with db.tx() as conn:
             q = ("SELECT c.*, b.connector, b.id AS bank_key FROM connections c JOIN banks b ON b.id = c.bank_id"
                  " WHERE c.deleted_at IS NULL AND c.status <> 'disconnected'")
@@ -104,6 +111,7 @@ class SyncEngine:
             return conn.execute(q + " ORDER BY c.created_at", params).fetchall()
 
     def build_connector(self, conn_row) -> BankConnector:
+        """Instancia el conector de una conexión con sus credenciales descifradas."""
         key = conn_row["connector"]
         if key not in self.settings.enabled_connectors:
             raise ConnectorUnavailable(conn_row["bank_id"], f"Conector '{key}' no habilitado en AVIA_ENABLED_CONNECTORS", "")
@@ -114,6 +122,7 @@ class SyncEngine:
         return get_connector_class(key)(creds)
 
     def store_credentials(self, conn, connection_id, creds: dict[str, Any]) -> None:
+        """Guarda (cifradas) las credenciales de una conexión."""
         conn.execute(
             """
             INSERT INTO credentials (connection_id, ciphertext, key_id) VALUES (%s,%s,%s)
@@ -124,6 +133,7 @@ class SyncEngine:
         )
 
     def _set_connection_status(self, connection_id, status, error=None, *, success=False):
+        """Actualiza estado y último error; con éxito marca last_success_at."""
         with db.tx() as conn:
             conn.execute(
                 "UPDATE connections SET status = %s, last_error = %s, updated_at = now()"
@@ -135,6 +145,7 @@ class SyncEngine:
                              " WHERE connection_id = %s AND resolved_at IS NULL", (connection_id,))
 
     def _sync_connection(self, run_id, conn_row, stats) -> None:
+        """Sincroniza una conexión: autentica, lee cuentas y saldos y sincroniza cada cuenta."""
         cid = conn_row["id"]
         try:
             connector = self.build_connector(conn_row)
@@ -186,6 +197,7 @@ class SyncEngine:
             self._set_connection_status(cid, "connected", None, success=True)
 
     def _auth_required(self, run_id, cid, reason, stats):
+        """Marca la conexión como «requiere reautorización» y lo deja pendiente."""
         with db.tx() as conn:
             conn.execute("UPDATE connections SET status = 'authorization_required', last_error = %s,"
                          " updated_at = now() WHERE id = %s", (reason, cid))
@@ -195,12 +207,14 @@ class SyncEngine:
         stats["errors"].append({"connection": str(cid), "message": f"Requiere reautorización: {reason}"})
 
     def _connection_error(self, run_id, cid, kind, reason, stats):
+        """Marca la conexión con error y lo registra."""
         self._set_connection_status(cid, "error", reason)
         with db.tx() as conn:
             repo.event(conn, "error", kind, reason, run_id=run_id, connection_id=cid)
         stats["errors"].append({"connection": str(cid), "message": reason})
 
     def _sync_account(self, run_id, conn_row, connector, acct, balance, stats) -> None:
+        """Sincroniza una cuenta de forma atómica: movimientos, reversas, cursor y saldo."""
         today = self.today()
         with db.tx() as conn:  # todo el trabajo de una cuenta es atómico: movimientos + cursor + saldo
             ba_id = repo.upsert_bank_account(conn, conn_row["id"], acct)

@@ -47,14 +47,17 @@ MERCHANTS = [
 
 
 def _h(*parts: Any) -> int:
+    """Hash entero estable para generar datos ficticios deterministas."""
     return int(hashlib.sha256("|".join(map(str, parts)).encode()).hexdigest()[:12], 16)
 
 
 def _santiago_today() -> date:
+    """Fecha de hoy en Santiago."""
     return datetime.now(ZoneInfo("America/Santiago")).date()
 
 
 class SandboxConnector(BankConnector):
+    """Banco ficticio determinista para pruebas: cuenta corriente y tarjeta con pendientes, reversas y pagos."""
     bank_id = "sandbox"
     display_name = "AVIA Sandbox (datos ficticios)"
     capabilities = frozenset(
@@ -79,6 +82,7 @@ class SandboxConnector(BankConnector):
 
     # ---- autenticación -------------------------------------------------
     def authenticate(self) -> dict[str, Any]:
+        """Simula expiración (90 días) y fallas según `fail_mode`."""
         mode = self.credentials.get("fail_mode")
         if mode == "auth":
             raise AuthorizationRequired("Sandbox: autorización expirada (simulada)")
@@ -90,12 +94,14 @@ class SandboxConnector(BankConnector):
         return {**self.credentials, "token_issued": self.credentials.get("token_issued") or self.today().isoformat()}
 
     def refresh_authorization(self) -> dict[str, Any]:
+        """Renueva el token ficticio y quita la falla simulada."""
         creds = {k: v for k, v in self.credentials.items() if k != "fail_mode"}
         creds["token_issued"] = self.today().isoformat()
         return creds
 
     # ---- datos ----------------------------------------------------------
     def get_accounts(self) -> list[BankAccount]:
+        """Cuenta corriente y tarjeta ficticias."""
         return [CHECKING, CARD]
 
     def _events(self, until: date) -> list[dict[str, Any]]:
@@ -145,9 +151,11 @@ class SandboxConnector(BankConnector):
 
     def _is_reversed(self, ev: dict[str, Any]) -> bool:
         # ~1 de cada 25 compras cotidianas es una retención que el comercio anula
+        """~1 de cada 25 compras cotidianas es una retención que se anula."""
         return bool(ev.get("reversible")) and _h("rev", ev["day"], ev["seq"]) % 25 == 0
 
     def get_transactions(self, account: BankAccount, since: date) -> list[BankTransaction]:
+        """Movimientos ficticios desde `since` (pendientes que luego se contabilizan)."""
         today = self.today()
         out: list[BankTransaction] = []
         for ev in self._events(today):
@@ -178,6 +186,7 @@ class SandboxConnector(BankConnector):
         return out
 
     def _booked_balance(self, account: BankAccount, as_of: date) -> Decimal:
+        """Saldo contable a una fecha: apertura + movimientos ya contabilizados."""
         total = OPENING[account.external_id]
         for ev in self._events(as_of):
             if ev["acct"].external_id == account.external_id and (as_of - ev["day"]).days >= PENDING_DAYS \
@@ -186,6 +195,7 @@ class SandboxConnector(BankConnector):
         return total
 
     def get_balances(self, accounts: list[BankAccount]) -> list[Balance]:
+        """Saldo contable y disponible (descontando pendientes)."""
         today = self.today()
         out = []
         for acct in accounts:
@@ -202,4 +212,5 @@ class SandboxConnector(BankConnector):
         return out
 
     def opening_balance(self, account: BankAccount) -> Decimal:
+        """Saldo de apertura de la cuenta ficticia."""
         return OPENING[account.external_id]

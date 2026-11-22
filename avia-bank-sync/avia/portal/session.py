@@ -53,6 +53,7 @@ HINTS = (
 
 
 def browser_settings() -> dict[str, Any]:
+    """Opciones de Chromium desde el entorno (headless y ruta)."""
     headless = os.environ.get("AVIA_BROWSER_HEADLESS", "true").lower() != "false"
     path = os.environ.get("AVIA_CHROMIUM_PATH") or None
     return {"headless": headless, "executable_path": path}
@@ -60,12 +61,14 @@ def browser_settings() -> dict[str, Any]:
 
 @dataclass
 class LoginResult:
+    """Resultado de un ingreso: cookies/almacenamiento y URL final."""
     storage_state: dict[str, Any]
     final_url: str
 
 
 @dataclass
 class LoginSession:
+    """Un ingreso a un portal en su propio hilo, con vista en vivo para el segundo factor."""
     portal: PortalConfig
     rut: str
     password: str
@@ -89,17 +92,21 @@ class LoginSession:
 
     # ------------------------------------------------------------- público
     def start(self) -> None:
+        """Lanza el ingreso en un hilo aparte."""
         self._thread = threading.Thread(target=self._run, name=f"login-{self.portal.bank_id}", daemon=True)
         self._thread.start()
 
     def send(self, cmd: dict[str, Any]) -> None:
+        """Encola una acción del usuario si el ingreso sigue abierto."""
         if self.state not in FINAL:
             self._cmds.put(cmd)
 
     def cancel(self) -> None:
+        """Cancela el ingreso."""
         self.send({"type": "cancel"})
 
     def snapshot(self, include_screenshot: bool = True) -> dict[str, Any]:
+        """Estado para la UI (RUT enmascarado y captura si espera al usuario)."""
         out = {
             "id": self.id, "bank": self.portal.bank_id, "bankName": self.portal.name,
             "state": self.state, "message": self.message, "hint": self.hint,
@@ -113,6 +120,7 @@ class LoginSession:
 
     # ------------------------------------------------------------- interno
     def _set(self, state: str, message: str | None = None, **kw) -> None:
+        """Cambia el estado y lo registra."""
         self.state = state
         if message is not None:
             self.message = message
@@ -122,6 +130,7 @@ class LoginSession:
         log.info("login", extra={"login_id": self.id, "bank": self.portal.bank_id, "state": state})
 
     def _run(self) -> None:
+        """Cuerpo del hilo: abre Chromium y conduce el ingreso; cualquier falla queda como estado."""
         try:
             from playwright.sync_api import sync_playwright
         except ImportError:
@@ -148,6 +157,7 @@ class LoginSession:
             self.password = ""  # no retener la clave en memoria más de lo necesario
 
     def _visible_error(self, page) -> str | None:
+        """Mensaje de error visible del portal (ignora enlaces de «olvidé mi clave»)."""
         for sel in self.portal.error_selectors:
             try:
                 for el in page.locator(sel).all()[:5]:
@@ -160,6 +170,7 @@ class LoginSession:
         return None
 
     def _hint(self, page) -> str | None:
+        """Pista según lo que muestra la página (Mi Pass, código, CAPTCHA)."""
         try:
             text = page.inner_text("body", timeout=1000).lower()
         except Exception:  # noqa: BLE001
@@ -170,6 +181,7 @@ class LoginSession:
         return None
 
     def _shoot(self, page) -> None:
+        """Toma captura JPEG para la vista en vivo."""
         try:
             self.screenshot = page.screenshot(type="jpeg", quality=60, timeout=5000)
             self.screenshot_at = time.time()
@@ -177,6 +189,7 @@ class LoginSession:
             pass
 
     def _apply(self, page, cmd: dict[str, Any]) -> bool:
+        """Aplica una acción del usuario a la página; False si cancela."""
         t = cmd.get("type")
         if t == "cancel":
             self._set("cancelled", "Ingreso cancelado.")
@@ -198,6 +211,7 @@ class LoginSession:
         return True
 
     def _drive(self, page, ctx) -> None:
+        """Abre el login, escribe RUT y clave, envía y pasa a esperar respuesta."""
         p = self.portal
         deadline = self.created_at + self.timeout_s
         try:
@@ -233,6 +247,7 @@ class LoginSession:
         self._wait_user(page, ctx, deadline)
 
     def _wait_user(self, page, ctx, deadline) -> None:
+        """Bucle hasta éxito, rechazo, segundo factor o tiempo agotado; al entrar llama on_success."""
         p = self.portal
         submitted_at = time.time()
         last_error = None
