@@ -388,23 +388,23 @@ _(sin docstring de módulo)_
 
 ### `avia-bank-sync/tests/integration/test_portal_login.py`
 Login asistido contra un portal bancario FALSO servido localmente (Chrome real).
-- **clase `FakeBank`**(BaseHTTPRequestHandler) · L33
-  - `log_message(*a)` · L37
-  - `_html(body, code, headers)` · L40
-  - `_redirect(to, cookie)` · L48
-  - `do_GET()` · L55
-  - `do_POST()` · L64
-- `fake_bank()` · L80
-- `fake_config(base)` · L87
-- `wait(sess, states, timeout)` · L96
-- `test_rut()` · L105 — prueba: rut
-- `test_login_success_stores_session(fake_bank)` · L112 — prueba: login success stores session
-- `test_wrong_password_reports_bank_message(fake_bank)` · L125 — prueba: wrong password reports bank message
-- `test_mfa_step_is_completed_by_the_user(fake_bank)` · L134 — prueba: mfa step is completed by the user
-- `test_cancel(fake_bank)` · L153 — prueba: cancel
-- `test_service_flow_creates_encrypted_connection(fake_bank, service, monkeypatch)` · L162 — prueba: service flow creates encrypted connection
-- `test_service_validates_input(service)` · L196 — prueba: service validates input
-- `test_unreachable_portal_has_clear_error()` · L212 — prueba: unreachable portal has clear error
+- **clase `FakeBank`**(BaseHTTPRequestHandler) · L37
+  - `log_message(*a)` · L41
+  - `_html(body, code, headers)` · L44
+  - `_redirect(to, cookie)` · L52
+  - `do_GET()` · L59
+  - `do_POST()` · L68
+- `fake_bank()` · L84
+- `fake_config(base)` · L91
+- `wait(sess, states, timeout)` · L100
+- `test_rut()` · L109 — prueba: rut
+- `test_login_success_stores_session(fake_bank)` · L116 — prueba: login success stores session
+- `test_wrong_password_reports_bank_message(fake_bank)` · L129 — prueba: wrong password reports bank message
+- `test_mfa_step_is_completed_by_the_user(fake_bank)` · L138 — prueba: mfa step is completed by the user
+- `test_cancel(fake_bank)` · L157 — prueba: cancel
+- `test_service_flow_creates_encrypted_connection(fake_bank, service, monkeypatch)` · L166 — prueba: service flow creates encrypted connection
+- `test_service_validates_input(service)` · L200 — prueba: service validates input
+- `test_unreachable_portal_has_clear_error()` · L216 — prueba: unreachable portal has clear error
 
 ### `avia-bank-sync/tests/integration/test_sync_engine.py`
 _(sin docstring de módulo)_
