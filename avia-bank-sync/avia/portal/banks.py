@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 
 @dataclass(frozen=True)
 class PortalConfig:
+    """Cómo entrar al portal de un banco: URL, selectores, formato de RUT y señales de éxito."""
     bank_id: str
     name: str
     login_url: str
@@ -31,9 +32,11 @@ class PortalConfig:
     hints: dict[str, str] = field(default_factory=dict)
 
     def is_success(self, url: str) -> bool:
+        """La URL indica sesión iniciada (y no es la de login)."""
         return bool(self.success_url.search(url)) and not self.is_login(url)
 
     def is_login(self, url: str) -> bool:
+        """La URL es una página de login."""
         return any(m in url for m in self.login_url_markers)
 
 
@@ -97,4 +100,5 @@ PORTALS: dict[str, PortalConfig] = {
 
 
 def host_of(url: str) -> str:
+    """Dominio de una URL."""
     return urlparse(url).netloc

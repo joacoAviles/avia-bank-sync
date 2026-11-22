@@ -19,13 +19,17 @@ from .portal.manager import LoginManager
 
 
 class ServiceError(Exception):
+    """Error de negocio con estado HTTP, código y mensaje para Actual."""
     def __init__(self, status: int, code: str, message: str):
+        """Guarda estado HTTP, código y mensaje."""
         super().__init__(message)
         self.status, self.code, self.message = status, code, message
 
 
 class AviaService:
+    """Lógica de la API: bancos, conexiones, logins, cuentas, movimientos y conciliación."""
     def __init__(self, settings, engine: SyncEngine):
+        """Recibe configuración y motor; crea el administrador de logins."""
         self.settings = settings
         self.engine = engine
         self._bg: threading.Thread | None = None
@@ -34,6 +38,7 @@ class AviaService:
 
     # ------------------------------------------------------------ estado
     def institutions(self) -> list[dict[str, Any]]:
+        """Bancos con disponibilidad, motivo, campos de Set up y método de ingreso."""
         with db.tx() as conn:
             banks = conn.execute("SELECT * FROM banks ORDER BY CASE id WHEN 'banco-chile' THEN 1"
                                  " WHEN 'itau' THEN 2 WHEN 'ripley' THEN 3 ELSE 9 END, name").fetchall()
@@ -55,6 +60,7 @@ class AviaService:
         return out
 
     def status(self) -> dict[str, Any]:
+        """Resumen del sistema: estado global, conexiones, última y próxima sincronización."""
         with db.tx() as conn:
             conns = conn.execute(
                 "SELECT c.id, c.label, c.status, c.last_error, c.last_success_at, b.name AS bank, c.bank_id,"
@@ -96,12 +102,14 @@ class AviaService:
         }
 
     def is_stale(self, last_ok: datetime | None) -> bool:
+        """Si la última sincronización exitosa es más vieja que freshness_hours."""
         if last_ok is None:
             return True
         return datetime.now(last_ok.tzinfo) - last_ok > timedelta(hours=self.settings.freshness_hours)
 
     # ------------------------------------------------------- conexiones
     def create_connection(self, institution: str, label: str | None, params: dict[str, Any]) -> dict:
+        """Crea una conexión por token o sandbox; los bancos con portal deben usar login_start."""
         with db.tx() as conn:
             bank = conn.execute("SELECT * FROM banks WHERE id = %s", (institution,)).fetchone()
         if not bank:
@@ -137,6 +145,7 @@ class AviaService:
         return {"id": str(cid), "accounts": len(accounts)}
 
     def delete_connection(self, cid: str) -> None:
+        """Desconecta conservando el historial: borra el secreto y desactiva sus cuentas."""
         with db.tx() as conn:
             r = conn.execute("UPDATE connections SET status = 'disconnected', deleted_at = now(), updated_at = now()"
                              " WHERE id = %s AND deleted_at IS NULL RETURNING id", (cid,)).fetchone()
@@ -148,6 +157,7 @@ class AviaService:
                        connection_id=cid)
 
     def reauthorize(self, cid: str, params: dict[str, Any]) -> dict:
+        """Renueva la autorización con el conector, guarda credenciales y relee; si el banco no lo permite, AUTHORIZATION_FAILED."""
         with db.tx() as conn:
             row = conn.execute("SELECT c.*, b.connector, b.id AS bank_key FROM connections c JOIN banks b"
                                " ON b.id = c.bank_id WHERE c.id = %s AND c.deleted_at IS NULL", (cid,)).fetchone()
@@ -177,6 +187,7 @@ class AviaService:
     # ------------------------------------------------------- login portal
     def login_start(self, institution: str, rut: str, password: str, label: str | None,
                     connection_id: str | None = None) -> dict[str, Any]:
+        """Valida banco, RUT y clave e inicia el ingreso por portal (o reingreso con la clave guardada)."""
         with db.tx() as conn:
             bank = conn.execute("SELECT * FROM banks WHERE id = %s", (institution,)).fetchone()
         if not bank:
@@ -201,6 +212,7 @@ class AviaService:
             raise ServiceError(422, "INVALID_PASSWORD", "Ingresa tu clave")
 
         def on_success(sess, result):
+            """Callback del ingreso exitoso: guarda la conexión."""
             return self._store_portal_login(institution, bank["name"], label, connection_id,
                                             rut, sess_password, result)
 
@@ -212,6 +224,7 @@ class AviaService:
         return sess.snapshot(include_screenshot=False)
 
     def _store_portal_login(self, institution, bank_name, label, connection_id, rut, password, result):
+        """Tras un ingreso exitoso guarda RUT, clave y sesión cifrados y lanza la lectura de cuentas."""
         from datetime import datetime, timezone
         creds = {"rut": rutlib.clean(rut), "password": password, "storage_state": result.storage_state,
                  "session_at": datetime.now(timezone.utc).isoformat()}
@@ -236,12 +249,14 @@ class AviaService:
         return {"connectionId": cid}
 
     def login_status(self, sid: str, include_screenshot: bool = True) -> dict[str, Any]:
+        """Estado de un ingreso por id."""
         sess = self.logins.get(sid)
         if not sess:
             raise ServiceError(404, "LOGIN_NOT_FOUND", "La sesión de ingreso no existe o expiró")
         return sess.snapshot(include_screenshot)
 
     def login_input(self, sid: str, cmd: dict[str, Any]) -> dict[str, Any]:
+        """Reenvía una acción permitida del usuario al ingreso."""
         sess = self.logins.get(sid)
         if not sess:
             raise ServiceError(404, "LOGIN_NOT_FOUND", "La sesión de ingreso no existe o expiró")
@@ -252,6 +267,7 @@ class AviaService:
 
     # ------------------------------------------------------------ cuentas
     def accounts(self) -> list[dict[str, Any]]:
+        """Cuentas activas con su institución, último saldo y vínculo con Actual."""
         with db.tx() as conn:
             rows = conn.execute(
                 """
@@ -278,10 +294,12 @@ class AviaService:
         } for r in rows]
 
     def link(self, bank_account_id: str, actual_account_id: str) -> None:
+        """Vincula cuenta AVIA ↔ cuenta de Actual."""
         with db.tx() as conn:
             self._ensure_mapping(conn, bank_account_id, actual_account_id)
 
     def unlink_actual(self, actual_account_id: str) -> int:
+        """Quita los vínculos de una cuenta de Actual; devuelve cuántos."""
         with db.tx() as conn:
             n = conn.execute("DELETE FROM account_mappings WHERE actual_account_id = %s",
                              (actual_account_id,)).rowcount
@@ -291,6 +309,7 @@ class AviaService:
 
     @staticmethod
     def _ensure_mapping(conn, bank_account_id, actual_account_id):
+        """Crea o cambia el vínculo y lo registra en la bitácora."""
         conn.execute("INSERT INTO actual_accounts (id) VALUES (%s) ON CONFLICT (id) DO UPDATE"
                      " SET last_seen_at = now()", (actual_account_id,))
         prev = conn.execute("SELECT actual_account_id FROM account_mappings WHERE bank_account_id = %s",
@@ -308,6 +327,7 @@ class AviaService:
     # ------------------------------------------------------- movimientos
     def transactions_for_actual(self, bank_account_id: str, start_date: date,
                                 actual_account_id: str | None) -> dict[str, Any]:
+        """Movimientos para Actual; si los datos están viejos, sincroniza esa conexión antes."""
         try:
             uuid.UUID(bank_account_id)
         except ValueError as exc:
@@ -354,6 +374,7 @@ class AviaService:
 
     # ---------------------------------------------------- conciliación
     def record_actual_balance(self, bank_account_id: str, cleared_balance_integer: int) -> dict[str, Any]:
+        """Compara el saldo de Actual con el del banco y explica posibles causas de diferencia."""
         actual = Decimal(cleared_balance_integer) / 100
         with db.tx() as conn:
             snap = conn.execute("SELECT * FROM balance_snapshots WHERE bank_account_id = %s"
@@ -383,6 +404,7 @@ class AviaService:
                 "pendingCount": pending["n"], "pendingAmount": pending["s"]}
 
     def reconciliation(self) -> list[dict[str, Any]]:
+        """Último saldo por cuenta con su diferencia contra Actual."""
         with db.tx() as conn:
             return conn.execute(
                 """
@@ -396,10 +418,12 @@ class AviaService:
     # ------------------------------------------------------ ejecuciones
     def start_background_sync(self, trigger: str, connection_ids: list[str] | None = None,
                               on_done=None) -> bool:
+        """Lanza una sincronización en un hilo si no hay otra; False si ya hay una."""
         if db.sync_lock_held() or (self._bg and self._bg.is_alive()):
             return False
 
         def work():
+            """Cuerpo del hilo de sincronización."""
             try:
                 res = self.engine.run(trigger, connection_ids)
                 if on_done:
@@ -412,10 +436,12 @@ class AviaService:
         return True
 
     def runs(self, limit: int = 20) -> list[dict[str, Any]]:
+        """Últimas ejecuciones de sincronización."""
         with db.tx() as conn:
             return conn.execute("SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT %s", (limit,)).fetchall()
 
     def events(self, limit: int = 100, level: str | None = None) -> list[dict[str, Any]]:
+        """Últimos eventos, opcionalmente filtrados por nivel."""
         with db.tx() as conn:
             if level:
                 return conn.execute("SELECT * FROM sync_events WHERE level = %s ORDER BY id DESC LIMIT %s",
@@ -423,6 +449,7 @@ class AviaService:
             return conn.execute("SELECT * FROM sync_events ORDER BY id DESC LIMIT %s", (limit,)).fetchall()
 
     def review_items(self) -> list[dict[str, Any]]:
+        """Movimientos que necesitan revisión manual (máx. 200)."""
         with db.tx() as conn:
             return conn.execute(
                 "SELECT t.lineage_id, t.status, t.value_date, t.amount, t.currency, t.description, t.review_reason,"
@@ -431,4 +458,5 @@ class AviaService:
 
 
 def santiago_now(tz: str) -> datetime:
+    """Hora actual en la zona dada."""
     return datetime.now(ZoneInfo(tz))

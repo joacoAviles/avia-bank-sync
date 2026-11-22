@@ -41,6 +41,7 @@ def clp(v: Any) -> Decimal:
 
 
 def to_date(v: Any) -> date | None:
+    """Convierte las fechas del portal (epoch ms/s, ISO o dd/mm/aaaa) a date."""
     if v is None or v == "":
         return None
     if isinstance(v, (int, float)) and v > 10**9:
@@ -57,26 +58,31 @@ def to_date(v: Any) -> date | None:
 
 
 def _h(*parts: Any) -> str:
+    """Hash corto estable para armar IDs de movimientos sin ID propio."""
     return hashlib.sha256("|".join(str(p) for p in parts).encode()).hexdigest()[:32]
 
 
 class BancoChilePortal(PortalConnector):
+    """Conector Banco de Chile: entra al portal y lee cuentas, tarjetas, saldos y movimientos por su API REST interna."""
     bank_id = portal_id = "banco-chile"
     display_name = "Banco de Chile"
     capabilities = frozenset({Capability.ACCOUNTS, Capability.BALANCES, Capability.AVAILABLE_BALANCE,
                               Capability.TRANSACTIONS, Capability.CREDIT_CARDS, Capability.INSTALLMENTS})
 
     def __init__(self, credentials=None):
+        """Guarda credenciales; los datos se cargan una vez por sincronización."""
         super().__init__(credentials)
         self._data: dict[str, dict[str, Any]] | None = None
         self.diagnostics: list = []
 
     # ------------------------------------------------------------ sesión
     def authenticate(self) -> dict[str, Any]:
+        """No valida aquí: la sesión se prueba al abrir el portal en get_accounts."""
         return self.credentials  # la sesión se valida al abrir el portal en get_accounts
 
     # ------------------------------------------------------------ extracción
     def _load(self, since: date | None = None) -> dict[str, dict[str, Any]]:
+        """Abre el portal una sola vez y carga productos, saldos y movimientos (90 días por defecto)."""
         if self._data is not None:
             return self._data
         since = since or (date.today() - timedelta(days=90))
@@ -120,11 +126,13 @@ class BancoChilePortal(PortalConnector):
 
     @staticmethod
     def _account_body(p, rut, nombre):
+        """Cuerpo JSON que el portal exige para identificar una cuenta corriente."""
         return {"nombreCliente": nombre, "rutCliente": rut, "numero": p.get("numero"), "mascara": p.get("mascara"),
                 "selected": True, "codigoProducto": p.get("codigo") or "CTD", "claseCuenta": p.get("claseCuenta"),
                 "moneda": p.get("codigoMoneda") or "CLP"}
 
     def _checking(self, c: PortalClient, rec, rut, nombre, since: date) -> None:
+        """Lee la cartola paginada de una cuenta corriente y arma sus movimientos."""
         p, cur = rec["p"], rec["acct"].currency
         body_acct = self._account_body(p, rut, nombre)
         desde, seen = 0, set()
@@ -173,6 +181,7 @@ class BancoChilePortal(PortalConnector):
                 break
 
     def _card_bodies(self, it, nombre) -> list[dict[str, Any]]:
+        """Variantes del cuerpo JSON de tarjeta (código de marca y nombre) a probar en orden."""
         marca, tipo = str(it.get("marca") or ""), str(it.get("tipo") or "")
         last4 = re.sub(r"\D", "", str(it.get("numero") or ""))[-4:]
         codes = [f"TN{marca[:1].upper()}", "TNM"] if marca else ["TNM"]
@@ -191,6 +200,7 @@ class BancoChilePortal(PortalConnector):
 
     @staticmethod
     def _try(c: PortalClient, url: str, bodies: list[dict[str, Any]]):
+        """Prueba cada cuerpo hasta que el portal acepte uno; devuelve respuesta y cuerpo usado."""
         last = None
         for b in bodies:
             try:
@@ -202,6 +212,7 @@ class BancoChilePortal(PortalConnector):
         raise last
 
     def _card(self, c: PortalClient, rec, nombre, since: date) -> None:
+        """Lee saldo, movimientos no facturados y facturados de una tarjeta de crédito."""
         cur = rec["acct"].currency
         bodies = self._card_bodies(rec["p"], nombre)
         rec["debug"] = {"bodies": len(bodies), "body_keys": {k: (str(v) and re.sub(r"\d", "9", str(v))[:30])
@@ -237,13 +248,16 @@ class BancoChilePortal(PortalConnector):
 
     # ------------------------------------------------------------ contrato
     def get_accounts(self) -> list[BankAccount]:
+        """Cuentas y tarjetas del titular."""
         return [r["acct"] for r in self._load().values()]
 
     def get_balances(self, accounts: list[BankAccount]) -> list[Balance]:
+        """Saldos de las cuentas pedidas (deuda de tarjeta en negativo)."""
         data = self._load()
         return [data[a.external_id]["bal"] for a in accounts if data.get(a.external_id, {}).get("bal")]
 
     def get_transactions(self, account: BankAccount, since: date) -> list[BankTransaction]:
+        """Movimientos de una cuenta desde `since`; si su lectura falló, lanza BankError."""
         rec = self._load(since).get(account.external_id)
         if rec and rec.get("error") and not rec["txs"]:
             raise BankError(rec["error"])

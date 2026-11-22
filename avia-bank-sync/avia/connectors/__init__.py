@@ -20,6 +20,7 @@ REGISTRY: dict[str, type[BankConnector]] = {
 
 
 def get_connector_class(key: str) -> type[BankConnector]:
+    """Clase del conector por su clave de REGISTRY (p. ej. 'banco_chile')."""
     try:
         return REGISTRY[key]
     except KeyError as exc:

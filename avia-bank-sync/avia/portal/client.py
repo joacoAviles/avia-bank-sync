@@ -32,7 +32,9 @@ async ({method, url, body, headers}) => {
 
 
 class PortalClient:
+    """Navegador con la sesión guardada para llamar la API interna del portal (reentra si venció)."""
     def __init__(self, portal: PortalConfig, credentials: dict[str, Any], api_marker: str, init_script: str | None = None):
+        """Prepara portal, credenciales, sesión guardada y marcador de URLs de la API."""
         self.portal = portal
         self.creds = credentials or {}
         self.state = self.creds.get("storage_state")
@@ -44,6 +46,7 @@ class PortalClient:
         self._pw = self._browser = self._ctx = self.page = None
 
     def __enter__(self) -> "PortalClient":
+        """Abre Chromium, reutiliza la sesión o vuelve a entrar con RUT y clave."""
         from playwright.sync_api import sync_playwright
 
         if not self.state and not (self.creds.get("rut") and self.creds.get("password")):
@@ -78,6 +81,7 @@ class PortalClient:
         return self
 
     def _where(self) -> str:
+        """Dónde quedó la página (dominio + ruta) para mensajes de error."""
         try:
             from urllib.parse import urlsplit
             u = urlsplit(self.page.url)
@@ -86,6 +90,7 @@ class PortalClient:
             return "?"
 
     def _session_ok(self) -> bool:
+        """Si la sesión guardada sigue válida."""
         if not self.state:
             return False
         try:
@@ -123,6 +128,7 @@ class PortalClient:
                 f"Vuelve a iniciar sesión desde Actual. Página: {self._where()}") from exc
 
     def __exit__(self, *exc) -> None:
+        """Cierra navegador y Playwright sin propagar errores."""
         for closer in (lambda: self._browser and self._browser.close(), lambda: self._pw and self._pw.stop()):
             try:
                 closer()
@@ -130,6 +136,7 @@ class PortalClient:
                 pass
 
     def _on_request(self, req) -> None:
+        """Copia los encabezados que usa el portal en sus llamadas a la API."""
         if self.api_marker in req.url and req.resource_type in ("xhr", "fetch"):
             for k, v in req.headers.items():
                 kl = k.lower()
@@ -137,6 +144,7 @@ class PortalClient:
                     self.headers[k] = v
 
     def call(self, method: str, url: str, body: Any = None) -> Any:
+        """Llama la API del portal desde la página; 401/403 pide reautorizar."""
         res = self.page.evaluate(_FETCH_JS, {"method": method, "url": url, "body": body, "headers": self.headers})
         path = url.split("?")[0].rsplit("/", 2)
         self.log.append((method, "/".join(path[-2:]), res["status"]))

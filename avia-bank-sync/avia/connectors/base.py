@@ -16,6 +16,7 @@ from typing import Any
 
 
 class Capability(str, enum.Enum):
+    """Qué sabe entregar un conector (cuentas, saldos, pendientes, tarjetas, cuotas…)."""
     ACCOUNTS = "accounts"
     BALANCES = "balances"
     AVAILABLE_BALANCE = "available_balance"
@@ -39,6 +40,7 @@ class ConnectorUnavailable(Exception):
     """No existe hoy un mecanismo autorizado y gratuito para este banco."""
 
     def __init__(self, bank_id: str, reason: str, doc: str):
+        """Guarda banco, motivo y documento que explica el bloqueo."""
         super().__init__(reason)
         self.bank_id = bank_id
         self.reason = reason
@@ -51,6 +53,7 @@ class BankError(Exception):
 
 @dataclass(frozen=True)
 class BankAccount:
+    """Cuenta o tarjeta tal como la entrega el banco."""
     external_id: str
     name: str
     account_type: str  # checking | vista | savings | credit_card | line_of_credit | other
@@ -60,6 +63,7 @@ class BankAccount:
 
 @dataclass(frozen=True)
 class Balance:
+    """Saldo contable y disponible de una cuenta en una fecha."""
     external_account_id: str
     currency: str
     booked: Decimal | None  # saldo contable (convención Actual: deuda de tarjeta = negativo)
@@ -69,6 +73,7 @@ class Balance:
 
 @dataclass(frozen=True)
 class BankTransaction:
+    """Movimiento bancario normalizado (pendiente o contabilizado), con cuotas y moneda original."""
     external_id: str  # ID bancario estable. Obligatorio: sin él no se puede deduplicar con certeza.
     status: str  # pending | booked
     value_date: date
@@ -90,6 +95,7 @@ class BankTransaction:
 
 
 class BankConnector(ABC):
+    """Interfaz común de todos los conectores de banco."""
     bank_id: str = ""
     display_name: str = ""
     capabilities: frozenset[Capability] = frozenset()
@@ -97,10 +103,12 @@ class BankConnector(ABC):
     setup_fields: tuple[dict[str, Any], ...] = ()
 
     def __init__(self, credentials: dict[str, Any] | None = None):
+        """Recibe las credenciales ya descifradas."""
         self.credentials = credentials or {}
 
     @classmethod
     def availability(cls) -> dict[str, Any]:
+        """Si el banco se puede usar hoy y, si no, por qué."""
         return {"available": True, "reason": None, "doc": None}
 
     @abstractmethod
@@ -108,13 +116,17 @@ class BankConnector(ABC):
         """Valida la autorización. Devuelve credenciales actualizadas (p. ej. tokens renovados)."""
 
     @abstractmethod
-    def get_accounts(self) -> list[BankAccount]: ...
+    def get_accounts(self) -> list[BankAccount]:
+        """Lista de cuentas del titular."""
 
     @abstractmethod
-    def get_balances(self, accounts: list[BankAccount]) -> list[Balance]: ...
+    def get_balances(self, accounts: list[BankAccount]) -> list[Balance]:
+        """Saldos de las cuentas pedidas."""
 
     @abstractmethod
-    def get_transactions(self, account: BankAccount, since: date) -> list[BankTransaction]: ...
+    def get_transactions(self, account: BankAccount, since: date) -> list[BankTransaction]:
+        """Movimientos de una cuenta desde una fecha."""
 
     def refresh_authorization(self) -> dict[str, Any]:
+        """Renueva la autorización; por defecto no se puede y pide reautorizar."""
         raise AuthorizationRequired("Este banco no permite renovar la autorización automáticamente")

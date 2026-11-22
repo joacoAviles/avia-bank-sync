@@ -22,14 +22,17 @@ TWO = Decimal("0.01")
 
 
 def money_str(v: Decimal) -> str:
+    """Monto con 2 decimales como texto."""
     return str(v.quantize(TWO, rounding=ROUND_HALF_UP))
 
 
 def to_actual_integer(v: Decimal) -> int:
+    """Monto a entero ×100 (formato interno de Actual)."""
     return int((v * 100).quantize(Decimal(1), rounding=ROUND_HALF_UP))
 
 
 def build_notes(t: dict[str, Any]) -> str | None:
+    """Notas para Actual: cuota n/m, moneda original y contraparte."""
     parts = []
     if t["installment_number"] and t["installment_total"]:
         parts.append(f"Cuota {t['installment_number']}/{t['installment_total']}")
@@ -42,6 +45,7 @@ def build_notes(t: dict[str, Any]) -> str | None:
 
 
 def to_actual_transaction(t: dict[str, Any], transfer: tuple[str, str] | None) -> dict[str, Any]:
+    """Un movimiento de AVIA al formato de bank sync de Actual (y transferencia si es pago de tarjeta)."""
     d: date = t["booked_date"] or t["value_date"]
     out = {
         "transactionId": t["lineage_id"],
@@ -61,6 +65,7 @@ def to_actual_transaction(t: dict[str, Any], transfer: tuple[str, str] | None) -
 
 
 def build_response(txns: list[dict[str, Any]], transfer_map: dict, balance: dict | None, currency: str) -> dict:
+    """Respuesta completa para Actual: contabilizados, pendientes y saldos."""
     items = [to_actual_transaction(t, transfer_map.get(t["id"])) for t in txns]
     booked = [i for i in items if i["booked"]]
     pending = [i for i in items if not i["booked"]]

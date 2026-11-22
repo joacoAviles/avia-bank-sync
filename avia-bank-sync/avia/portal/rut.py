@@ -6,10 +6,12 @@ import re
 
 
 def clean(rut: str) -> str:
+    """RUT solo con dígitos y K mayúscula."""
     return re.sub(r"[^0-9kK]", "", rut or "").upper()
 
 
 def check_digit(body: str) -> str:
+    """Dígito verificador (módulo 11)."""
     total, factor = 0, 2
     for d in reversed(body):
         total += int(d) * factor
@@ -19,6 +21,7 @@ def check_digit(body: str) -> str:
 
 
 def is_valid(rut: str) -> bool:
+    """Si el RUT tiene dígito verificador correcto."""
     c = clean(rut)
     if len(c) < 2 or not c[:-1].isdigit():
         return False
@@ -37,5 +40,6 @@ def fmt(rut: str, style: str = "dotted") -> str:
 
 
 def mask(rut: str) -> str:
+    """RUT enmascarado para mostrar (**.***.123-4)."""
     c = clean(rut)
     return f"**.***.{c[-4:-1]}-{c[-1]}" if len(c) >= 4 else "***"

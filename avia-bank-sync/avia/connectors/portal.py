@@ -19,6 +19,7 @@ class ExtractionPending(Exception):
 
 
 class PortalConnector(BankConnector):
+    """Base de bancos con login por portal (RUT + clave); sin lectura propia marca «extracción pendiente»."""
     auth_method = "portal_login"
     portal_id = ""
     setup_fields = (
@@ -28,27 +29,34 @@ class PortalConnector(BankConnector):
 
     def authenticate(self) -> dict[str, Any]:
         # La validez de la sesión se comprueba al extraer (siguiente paso).
+        """La sesión se comprueba al extraer, no aquí."""
         return self.credentials
 
     def _pending(self):
+        """Lanza ExtractionPending: login listo, lectura aún no implementada."""
         raise ExtractionPending(f"{self.display_name}: login listo; la lectura de datos aún no está implementada")
 
     def get_accounts(self) -> list[BankAccount]:
+        """Pendiente hasta implementar la lectura de este portal."""
         self._pending()
 
     def get_balances(self, accounts: list[BankAccount]) -> list[Balance]:
+        """Pendiente hasta implementar la lectura de este portal."""
         self._pending()
 
     def get_transactions(self, account: BankAccount, since: date) -> list[BankTransaction]:
+        """Pendiente hasta implementar la lectura de este portal."""
         self._pending()
 
 
 class ItauPortal(PortalConnector):
+    """Itaú: bloqueado, su portal rechaza ingresos automatizados (Error 15)."""
     bank_id = portal_id = "itau"
     display_name = "Itaú Chile"
 
     @classmethod
     def availability(cls):
+        """Siempre no disponible, con el motivo."""
         return {"available": False, "doc": None,
                 "reason": "Itaú no disponible: su portal bloquea los ingresos automatizados (Error 15)."}
 

@@ -39,6 +39,7 @@ POLL_TRIES = 36  # ~3 minutos
 
 
 def _dec(v: Any) -> Decimal:
+    """Convierte montos con coma o punto decimal a Decimal."""
     s = str(v or "").strip().replace(" ", "")
     if not s:
         return Decimal("0")
@@ -53,6 +54,7 @@ def _dec(v: Any) -> Decimal:
 
 
 def _d(v: str) -> date:
+    """Fecha ISO (con o sin hora) a date."""
     return datetime.fromisoformat(v.strip().replace("Z", "+00:00")).date() if "T" in v else date.fromisoformat(v.strip()[:10])
 
 
@@ -91,6 +93,7 @@ def parse_release_csv(text: str) -> tuple[list[BankTransaction], Decimal | None]
 
 
 class MercadoPagoConnector(BankConnector):
+    """Conector Mercado Pago por Access Token: saldo y movimientos vía reportes de liberación."""
     bank_id = "mercado-pago"
     display_name = "Mercado Pago"
     auth_method = "access_token"
@@ -103,6 +106,7 @@ class MercadoPagoConnector(BankConnector):
     sleep = staticmethod(time.sleep)
 
     def __init__(self, credentials: dict[str, Any] | None = None):
+        """Guarda credenciales y el último saldo leído."""
         super().__init__(credentials)
         self._last_balance: Decimal | None = None
 
@@ -110,9 +114,11 @@ class MercadoPagoConnector(BankConnector):
     def _token(self) -> str:
         # La UI de Actual no tiene campo para el token: se entrega una sola vez por AVIA_MP_ACCESS_TOKEN
         # (.env del servidor) y desde ahí queda guardado cifrado en la base; luego se puede borrar del .env.
+        """Token guardado cifrado o, la primera vez, AVIA_MP_ACCESS_TOKEN del .env."""
         return (self.credentials.get("access_token") or os.environ.get("AVIA_MP_ACCESS_TOKEN") or "").strip()
 
     def _client(self) -> httpx.Client:
+        """Cliente HTTP con el token; sin token pide configurarlo."""
         tok = self._token()
         if not tok:
             raise AuthorizationRequired("Falta el Access Token: ponlo en AVIA_MP_ACCESS_TOKEN en el .env del servidor y recrea avia-api")
@@ -122,6 +128,7 @@ class MercadoPagoConnector(BankConnector):
         return c
 
     def _check(self, r: httpx.Response) -> httpx.Response:
+        """Traduce 401/403 a reautorización y otros errores HTTP a BankError."""
         if r.status_code in (401, 403):
             raise AuthorizationRequired("Mercado Pago rechazó el Access Token (inválido, vencido o sin permiso de reportes)")
         if r.status_code >= 400:
@@ -129,6 +136,7 @@ class MercadoPagoConnector(BankConnector):
         return r
 
     def authenticate(self) -> dict[str, Any]:
+        """Valida el token con /users/me y exige cuenta chilena (MLC)."""
         with self._client() as c:
             me = self._check(c.get("/users/me")).json()
         site = str(me.get("site_id", ""))
@@ -138,11 +146,13 @@ class MercadoPagoConnector(BankConnector):
         return self.credentials
 
     def get_accounts(self) -> list[BankAccount]:
+        """Una sola cuenta vista «Mercado Pago»."""
         uid = self.credentials.get("user_id") or self.authenticate()["user_id"]
         return [BankAccount(external_id=uid, name="Mercado Pago", account_type="vista", currency="CLP",
                             masked_number=f"****{uid[-4:]}")]
 
     def get_balances(self, accounts: list[BankAccount]) -> list[Balance]:
+        """Saldo total y disponible de la cuenta."""
         acc = accounts[0]
         bal: Decimal | None = None
         avail: Decimal | None = None
@@ -158,6 +168,7 @@ class MercadoPagoConnector(BankConnector):
 
     # ------------------------------------------------------------------
     def _ensure_config(self, c: httpx.Client) -> None:
+        """Crea la configuración del reporte de liberación si no existe."""
         r = c.get("/v1/account/release_report/config")
         if r.status_code == 200:
             return
@@ -169,6 +180,7 @@ class MercadoPagoConnector(BankConnector):
             self._check(rr)
 
     def _fetch_range(self, c: httpx.Client, begin: date, end: date) -> str:
+        """Pide un reporte de un rango, espera a que esté listo y devuelve el CSV."""
         b = datetime(begin.year, begin.month, begin.day, tzinfo=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         e = datetime(end.year, end.month, end.day, 23, 59, 59, tzinfo=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         self._check(c.post("/v1/account/release_report", json={"begin_date": b, "end_date": e}))
@@ -184,6 +196,7 @@ class MercadoPagoConnector(BankConnector):
         raise BankError("Mercado Pago no terminó de generar el reporte a tiempo; se reintentará en la próxima sincronización")
 
     def get_transactions(self, account: BankAccount, since: date) -> list[BankTransaction]:
+        """Movimientos desde `since` (máx. 2 años), pedidos en tramos de 60 días."""
         today = date.today()
         since = max(since, today - timedelta(days=365 * 2))
         txs: list[BankTransaction] = []

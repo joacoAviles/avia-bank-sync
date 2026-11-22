@@ -31,6 +31,7 @@ MAX_ENTRIES = 60
 
 
 def shape(v, key: str = "", depth: int = 0):
+    """Forma de un JSON (claves y tipos) sin los valores."""
     if depth > 6:
         return "…"
     if isinstance(v, dict):
@@ -53,6 +54,7 @@ def shape(v, key: str = "", depth: int = 0):
 
 
 def norm_url(u: str) -> str:
+    """URL con números e IDs reemplazados y solo los nombres de sus parámetros."""
     s = urlsplit(u)
     path = re.sub(r"/\d{3,}", "/:n", s.path)
     path = re.sub(r"/[0-9a-fA-F-]{16,}", "/:id", path)
@@ -61,10 +63,12 @@ def norm_url(u: str) -> str:
 
 
 def mask_label(t: str) -> str:
+    """Etiqueta con los dígitos enmascarados."""
     return re.sub(r"\d", "9", t)[:50]
 
 
 def load_state(bank_id: str, full: bool = False):
+    """Sesión (y, con full, credenciales) guardada de un banco, descifrada desde la base."""
     s = get_settings()
     db.init_pool(s.database_url)
     box = SecretBox(s.encryption_keys)
@@ -79,6 +83,7 @@ def load_state(bank_id: str, full: bool = False):
 
 
 def main(bank_id: str) -> None:
+    """Recorre en solo lectura las secciones de consulta del portal y registra la estructura de sus respuestas."""
     from playwright.sync_api import sync_playwright
 
     portal = PORTALS[bank_id]
@@ -94,6 +99,7 @@ def main(bank_id: str) -> None:
         page = ctx.new_page()
 
         def on_response(resp):
+            """Registra URL normalizada y forma del JSON de cada respuesta de consulta."""
             try:
                 req = resp.request
                 if req.resource_type not in ("xhr", "fetch") or len(entries) >= MAX_ENTRIES:
@@ -127,6 +133,7 @@ def main(bank_id: str) -> None:
             return
 
         def labels():
+            """Textos visibles de botones, enlaces, menús y pestañas (2 a 40 caracteres, sin repetir)."""
             raw = page.eval_on_selector_all(
                 "a[href], button, [role=menuitem], [role=tab]",
                 "els => els.map(e => (e.innerText || e.getAttribute('aria-label') || '').trim())")

@@ -14,16 +14,20 @@ log = logging.getLogger("avia.scheduler")
 
 
 class AviaScheduler:
+    """Sincronización diaria (6:15) y aviso al runner de Actual."""
     def __init__(self, settings, service):
+        """Prepara APScheduler en la zona horaria configurada."""
         self.settings = settings
         self.service = service
         self._s = BackgroundScheduler(timezone=settings.timezone)
 
     @property
     def running(self) -> bool:
+        """Si el scheduler está corriendo."""
         return self._s.running
 
     def start(self) -> None:
+        """Programa la sincronización diaria y arranca."""
         self._s.add_job(
             self.daily,
             CronTrigger(hour=self.settings.daily_sync_hour, minute=self.settings.daily_sync_minute,
@@ -34,14 +38,17 @@ class AviaScheduler:
         log.info("scheduler iniciado", extra={"next_run": str(self.next_run_time())})
 
     def shutdown(self) -> None:
+        """Detiene el scheduler."""
         if self._s.running:
             self._s.shutdown(wait=False)
 
     def next_run_time(self):
+        """Próxima ejecución programada."""
         job = self._s.get_job("daily-sync")
         return job.next_run_time if job else None
 
     def daily(self) -> None:
+        """Sincroniza todo si hay conexiones y luego avisa al runner."""
         if not self.service.status()["configured"]:
             return
         try:
@@ -65,6 +72,7 @@ class AviaScheduler:
             log.warning("no se pudo notificar al runner de Actual", extra={"error": str(exc)})
 
     def _notify(self, result: dict) -> None:
+        """Si la sincronización no salió bien, avisa por AVIA_NOTIFY_WEBHOOK_URL (compatible con ntfy)."""
         url = self.settings.notify_webhook_url
         if not url or result.get("status") == "succeeded":
             return

@@ -49,26 +49,31 @@ HOOK_JS = """
 
 
 class RipleyPortal(PortalConnector):
+    """Conector Banco Ripley: entra al portal y captura las respuestas JSON de cuentas y tarjetas."""
     bank_id = portal_id = "ripley"
     display_name = "Banco Ripley"
     capabilities = frozenset({Capability.ACCOUNTS, Capability.BALANCES, Capability.AVAILABLE_BALANCE,
                               Capability.TRANSACTIONS, Capability.CREDIT_CARDS})
 
     def __init__(self, credentials=None):
+        """Guarda credenciales; los datos se cargan una vez por sincronización."""
         super().__init__(credentials)
         self._data: dict[str, dict[str, Any]] | None = None
         self.diagnostics: list = []
         self.debug: dict[str, Any] = {}
 
     def authenticate(self) -> dict[str, Any]:
+        """La sesión se prueba al abrir el portal."""
         return self.credentials
 
     # ------------------------------------------------------------ utilidades de página
     @staticmethod
     def _cap(page, pred_js: str) -> list[Any]:
+        """Respuestas JSON capturadas en la página que cumplen el filtro JS."""
         return page.evaluate(f"(window.__aviaCap || []).filter({pred_js})")
 
     def _wait_cap(self, page, pred_js: str, timeout_s: int = 30) -> list[Any]:
+        """Espera hasta `timeout_s` a que aparezca una respuesta capturada que cumpla el filtro."""
         for _ in range(timeout_s * 2):
             got = self._cap(page, pred_js)
             if got:
@@ -78,6 +83,7 @@ class RipleyPortal(PortalConnector):
 
     @staticmethod
     def _click_menu(page, label: str) -> None:
+        """Hace clic en un ítem del menú del portal por su texto."""
         pat = re.compile(rf"^\s*{re.escape(label)}\s*$", re.I)
         for loc in (page.locator("app-menu-item button.menu-item").filter(has_text=pat),
                     page.get_by_role("button", name=pat), page.get_by_text(pat)):
@@ -90,6 +96,7 @@ class RipleyPortal(PortalConnector):
 
     # ------------------------------------------------------------ extracción
     def _load(self, since: date | None = None) -> dict[str, dict[str, Any]]:
+        """Abre el portal una vez y carga productos, saldos y movimientos."""
         if self._data is not None:
             return self._data
         since = since or (date.today() - timedelta(days=90))
@@ -178,6 +185,7 @@ class RipleyPortal(PortalConnector):
             rec["error"] = f"Banco Ripley: depósitos a plazo ({type(exc).__name__})"
 
     def _read_checking(self, page, rec, since: date) -> None:
+        """Lee los movimientos de la cuenta corriente."""
         page.goto(f"{HOME}/account-balance/accounts;id={rec['acct'].external_id}", wait_until="domcontentloaded",
                   timeout=45000)
         got = self._wait_cap(page, "o => Array.isArray(o) && o[0] && 'isDebit' in o[0]", 30)
@@ -204,6 +212,7 @@ class RipleyPortal(PortalConnector):
             pass
 
     def _read_card(self, page, rec, since: date) -> None:
+        """Lee saldo y movimientos (no facturados y facturados) de la tarjeta."""
         page.goto(f"{HOME}/account-balance/credit-cards;id={rec['acct'].external_id}", wait_until="domcontentloaded",
                   timeout=45000)
         pred = "o => !Array.isArray(o) && Array.isArray(o.movements)"
@@ -259,13 +268,16 @@ class RipleyPortal(PortalConnector):
 
     # ------------------------------------------------------------ contrato
     def get_accounts(self) -> list[BankAccount]:
+        """Cuentas y tarjetas del titular."""
         return [r["acct"] for r in self._load().values()]
 
     def get_balances(self, accounts: list[BankAccount]) -> list[Balance]:
+        """Saldos de las cuentas pedidas."""
         data = self._load()
         return [data[a.external_id]["bal"] for a in accounts if data.get(a.external_id, {}).get("bal")]
 
     def get_transactions(self, account: BankAccount, since: date) -> list[BankTransaction]:
+        """Movimientos desde `since`; si su lectura falló, lanza BankError."""
         rec = self._load(since).get(account.external_id)
         if rec and rec.get("error") and not rec["txs"]:
             raise BankError(rec["error"])

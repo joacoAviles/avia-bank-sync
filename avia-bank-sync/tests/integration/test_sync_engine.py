@@ -263,7 +263,12 @@ def test_credentials_are_encrypted(service):
 def test_portal_institutions_use_login_flow(service):
     inst = {i["id"]: i for i in service.institutions()}
     assert inst["sandbox"]["available"] and inst["sandbox"]["testData"]
-    for bank in ("banco-chile", "itau", "ripley"):
+    # Itaú queda bloqueado: su portal rechaza los ingresos automatizados (Error 15).
+    assert not inst["itau"]["available"] and "Error 15" in inst["itau"]["reason"]
+    with pytest.raises(ServiceError) as e:
+        service.create_connection("itau", None, {})
+    assert e.value.code == "INSTITUTION_BLOCKED"
+    for bank in ("banco-chile", "ripley", "banco-estado"):
         assert inst[bank]["available"] and inst[bank]["authMethod"] == "portal_login"
         assert [f["name"] for f in inst[bank]["setupFields"]] == ["rut", "password"]
         with pytest.raises(ServiceError) as e:

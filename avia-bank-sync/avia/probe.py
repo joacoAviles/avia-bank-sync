@@ -16,6 +16,7 @@ from .recon import load_state
 
 
 def mag(x) -> str:
+    """Orden de magnitud con signo (oculta el monto exacto)."""
     if x is None:
         return "—"
     v = abs(float(x))
@@ -23,10 +24,12 @@ def mag(x) -> str:
 
 
 def mask_txt(s: str) -> str:
+    """Enmascara letras y dígitos de un texto."""
     return re.sub(r"[A-Za-zÁÉÍÓÚáéíóúñÑ]", "x", re.sub(r"\d", "9", s or ""))[:40]
 
 
 def main(bank: str) -> None:
+    """Lee cuentas, saldos y movimientos con la sesión real e imprime todo enmascarado."""
     key = bank.replace("-", "_")
     cls = REGISTRY[key]
     creds = load_state(bank, full=True)
