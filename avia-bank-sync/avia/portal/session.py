@@ -269,7 +269,8 @@ class LoginSession:
                 except Exception:  # noqa: BLE001
                     pass
                 state = ctx.storage_state()
-                self._set("succeeded", "Sesión iniciada. Guardando acceso cifrado…", hint=None)
+                # Aún no es «succeeded»: quien consulte el estado debe ver el resultado (connectionId) ya guardado.
+                self._set(self.state, "Sesión iniciada. Guardando acceso cifrado…", hint=None)
                 try:
                     self.result = self.on_success(self, LoginResult(storage_state=state, final_url=page.url))
                     self._set("succeeded", "Conectado.")
