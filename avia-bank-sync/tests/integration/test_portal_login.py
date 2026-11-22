@@ -16,7 +16,11 @@ from avia.portal.banks import PortalConfig
 from avia.portal.manager import LoginManager
 from tests.conftest import q
 
-os.environ.setdefault("AVIA_CHROMIUM_PATH", "/usr/bin/google-chrome")
+# Chrome del sistema si existe (Linux/CI); si no, el Chromium de Playwright (`python -m playwright install chromium`).
+for _chrome in ("/usr/bin/google-chrome", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"):
+    if os.path.exists(_chrome):
+        os.environ.setdefault("AVIA_CHROMIUM_PATH", _chrome)
+        break
 VALID_RUT = "11.111.111-1"
 
 LOGIN = """<!doctype html><html><body>
